@@ -3,7 +3,8 @@ import { brands as fallbackBrands } from "@/data/site";
 
 export function BrandWall() {
   const [brandList, setBrandList] = useState<string[]>(fallbackBrands);
-  const apiUrl = import.meta.env["VITE_API_URL"] || "http://127.0.0.1:8000/api/v1";
+  const rawApiUrl = (import.meta.env["VITE_API_URL"] || "http://127.0.0.1:8000/api/v1").trim().replace(/\/+$/, '');
+  const apiUrl = rawApiUrl.endsWith('/api/v1') ? rawApiUrl : `${rawApiUrl}/api/v1`;
 
   useEffect(() => {
     fetch(`${apiUrl}/filters`)

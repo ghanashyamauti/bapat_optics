@@ -207,7 +207,8 @@ export function Collection() {
   };
 
   const storeUrl = import.meta.env["VITE_STORE_URL"] || "http://localhost:5173";
-  const apiUrl = import.meta.env["VITE_API_URL"] || "http://127.0.0.1:8000/api/v1";
+  const rawApiUrl = (import.meta.env["VITE_API_URL"] || "http://127.0.0.1:8000/api/v1").trim().replace(/\/+$/, '');
+  const apiUrl = rawApiUrl.endsWith('/api/v1') ? rawApiUrl : `${rawApiUrl}/api/v1`;
 
   const handleShareProduct = async (product: LandingProduct) => {
     const directUrl = `${storeUrl}/?product=${encodeURIComponent(product.id)}`;

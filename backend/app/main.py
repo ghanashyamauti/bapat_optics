@@ -62,6 +62,23 @@ def root():
         "api_v1": settings.API_V1_STR
     }
 
+@app.get("/api/v1")
+@app.get("/api/v1/")
+def api_v1_index():
+    return {
+        "status": "online",
+        "service": "Bapat Optics API v1",
+        "docs": "/docs",
+        "endpoints": {
+            "products": "/api/v1/products",
+            "filters": "/api/v1/filters",
+            "orders": "/api/v1/orders",
+            "appointments": "/api/v1/appointments",
+            "inquiries": "/api/v1/inquiries",
+            "auth": "/api/v1/auth"
+        }
+    }
+
 @app.get("/health")
 def health_check():
     try:
