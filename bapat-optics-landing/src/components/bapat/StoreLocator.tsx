@@ -4,7 +4,7 @@ import { contact, stores, whatsappUrl } from "@/data/site";
 
 export function StoreLocator() {
   return (
-    <section id="stores" className="bg-bone py-16 sm:py-20 md:py-28">
+    <section id="stores" className="w-full max-w-full overflow-hidden bg-bone py-16 sm:py-20 md:py-28">
       <div className="mx-auto max-w-[1600px] px-5 sm:px-6 md:px-10">
         <div className="mb-10 flex flex-wrap items-end justify-between gap-4 border-t border-obsidian/15 pt-6 sm:mb-12 sm:pt-8 md:mb-14">
           <div>

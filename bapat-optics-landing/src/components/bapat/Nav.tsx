@@ -29,7 +29,7 @@ export function Nav() {
           : "border-b border-transparent py-6"
       }`}
     >
-      <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 md:px-10">
+      <div className="mx-auto flex max-w-[1600px] items-center justify-between px-4 sm:px-6 md:px-10">
         <a
           href="#top"
           data-cursor="TOP"

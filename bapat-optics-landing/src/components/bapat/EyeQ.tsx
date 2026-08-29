@@ -43,7 +43,7 @@ export function EyeQ() {
               As a Zeiss partner, Bapat Optics works with digital measurement and fitting
               technology rather than guesswork. Certified optometrists perform comprehensive digital refraction with zero guesswork.
             </p>
-            <span className="eyebrow inline-block rounded border border-gold/50 bg-gold/10 px-3.5 py-2 text-[9px] text-gold">
+            <span className="eyebrow inline-block max-w-full rounded border border-gold/50 bg-gold/10 px-3 py-1.5 text-[8.5px] leading-relaxed text-gold sm:px-3.5 sm:py-2 sm:text-[9px]">
               Zeiss Visufit 1000 · Launched in Pune at Bapat Optics · Free Checkups
             </span>
           </div>

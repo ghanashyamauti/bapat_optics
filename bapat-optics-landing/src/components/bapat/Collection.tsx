@@ -85,8 +85,8 @@ function ProductCard({
     >
       <div className="relative">
         {/* Badges */}
-        <div className="absolute left-3.5 top-3.5 z-10 flex flex-wrap gap-1.5 pointer-events-none">
-          <span className="eyebrow rounded bg-obsidian/90 px-2.5 py-1 text-[8px] tracking-wider text-paper backdrop-blur-md">
+        <div className="absolute left-3.5 top-3.5 z-10 flex max-w-[calc(100%-3.5rem)] flex-wrap gap-1.5 pointer-events-none">
+          <span className="eyebrow truncate rounded bg-obsidian/90 px-2.5 py-1 text-[8px] tracking-wider text-paper backdrop-blur-md">
             {product.brand}
           </span>
           <span className="eyebrow rounded border border-gold/40 bg-gold/15 px-2 py-0.5 text-[8px] tracking-wider text-gold font-bold">
@@ -388,12 +388,12 @@ export function Collection() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2.5 sm:flex-row">
+          <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
             <a
               href={storeUrl}
               target="_blank"
               rel="noreferrer"
-              className="eyebrow inline-flex items-center justify-center gap-2 rounded-full bg-obsidian px-6 py-3 text-[10px] font-bold tracking-wider text-paper hover:bg-gold hover:text-obsidian transition-colors shadow-md"
+              className="eyebrow inline-flex w-full items-center justify-center gap-2 rounded-full bg-obsidian px-5 py-3 text-center text-[9px] font-bold tracking-wide text-paper shadow-md transition-colors hover:bg-gold hover:text-obsidian sm:w-auto sm:px-6 sm:text-[10px]"
             >
               <span>Explore Full {totalProductsCount}+ Store Catalog</span>
               <ArrowUpRight size={14} />

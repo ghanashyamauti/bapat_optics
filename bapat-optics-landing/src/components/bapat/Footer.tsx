@@ -12,7 +12,7 @@ const quickLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-paper/10 bg-obsidian pb-10 pt-14 sm:pb-12 sm:pt-16 md:pt-20">
+    <footer className="w-full max-w-full overflow-hidden border-t border-paper/10 bg-obsidian pb-10 pt-14 sm:pb-12 sm:pt-16 md:pt-20">
       <div className="mx-auto max-w-[1600px] px-5 sm:px-6 md:px-10">
         {/* Brand Top Bar */}
         <div className="grid gap-10 md:grid-cols-12 md:items-start pb-12 sm:pb-14 border-b border-paper/10">

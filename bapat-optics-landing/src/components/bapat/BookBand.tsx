@@ -7,7 +7,7 @@ export function BookBand() {
   const store = stores.find((s) => s.id === storeId) ?? stores[0];
 
   return (
-    <section className="bg-obsidian py-14 grain sm:py-18 md:py-24">
+    <section className="w-full max-w-full overflow-hidden bg-obsidian py-14 grain sm:py-18 md:py-24">
       <div className="mx-auto max-w-[1600px] px-5 sm:px-6 md:px-10">
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">

@@ -54,7 +54,7 @@ export function Manifesto() {
   }, [reduced]);
 
   return (
-    <section id="manifesto" className="bg-bone py-16 sm:py-20 md:py-28">
+    <section id="manifesto" className="w-full max-w-full overflow-hidden bg-bone py-16 sm:py-20 md:py-28">
       <div ref={ref} className="mx-auto max-w-[1600px] px-5 sm:px-6 md:px-10">
         <div className="grid gap-10 lg:grid-cols-12 lg:gap-14 lg:items-center">
           

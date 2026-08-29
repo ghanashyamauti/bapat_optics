@@ -21,7 +21,7 @@ export function BrandWall() {
   const row = [...brandList, ...brandList];
 
   return (
-    <section className="w-full max-w-[100vw] overflow-hidden border-y border-paper/10 bg-obsidian py-14">
+    <section className="w-full max-w-full overflow-hidden border-y border-paper/10 bg-obsidian py-14">
       <p className="eyebrow mb-10 px-6 text-center text-[9px] tracking-[0.24em] text-steel md:px-10">
         Authorized Luxury Brand Partners · 65+ Houses Available At Pune Stores
       </p>

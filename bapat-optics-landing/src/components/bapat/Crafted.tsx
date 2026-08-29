@@ -167,19 +167,14 @@ export function Crafted() {
           trigger: container,
           start: "top top",
           end: "bottom bottom",
-          scrub: 0.15, // Silky smooth response
+          scrub: 0.1, // Smooth, immediate response
           onUpdate: (self) => {
-            const p = self.progress;
-
-            // Map 0% -> 75% of the scroll track to 0% -> 100% of the assembly animation.
-            // This ensures 100% completion (Frame 240) is reached well before the sticky track ends.
-            // The remaining 25% of scroll distance firmly holds the 100% completed frame in view before scrolling away.
-            const animProgress = Math.min(1, Math.max(0, p / 0.75));
-            setProgress(animProgress);
+            const p = Math.min(1, Math.max(0, self.progress));
+            setProgress(p);
 
             const targetFrame = Math.max(
               1,
-              Math.min(TOTAL_FRAMES, Math.round(animProgress * (TOTAL_FRAMES - 1)) + 1)
+              Math.min(TOTAL_FRAMES, Math.round(p * (TOTAL_FRAMES - 1)) + 1)
             );
             
             if (targetFrame !== currentFrameRef.current) {
@@ -240,11 +235,11 @@ export function Crafted() {
   };
 
   return (
-    <section id="crafted" ref={containerRef} className="relative bg-obsidian text-paper">
-      {/* Pinned Scroll Canvas Track: 360vh on mobile, 440vh on desktop for complete, immersive frame progression */}
-      <div className="relative h-[360vh] md:h-[440vh] w-full">
+    <section id="crafted" className="relative bg-obsidian text-paper">
+      {/* Pinned Scroll Canvas Track: 300vh on mobile, 360vh on desktop */}
+      <div ref={containerRef} className="relative h-[300vh] md:h-[360vh] w-full">
         {/* Sticky Viewport Container */}
-        <div className="sticky top-0 flex h-screen w-full flex-col justify-between overflow-hidden">
+        <div className="sticky top-0 flex h-[100svh] w-full flex-col justify-between overflow-hidden">
           {/* Background High-Performance HTML5 Canvas */}
           <div className="absolute inset-0 bg-obsidian">
             <canvas
@@ -257,23 +252,23 @@ export function Crafted() {
           </div>
 
           {/* Top Bar HUD / Telemetry */}
-          <div className="relative z-20 mx-auto flex w-full max-w-[1600px] items-center justify-between px-5 pt-18 sm:px-6 sm:pt-20 md:px-10 md:pt-22">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <span className="flex h-2 w-2 animate-pulse rounded-full bg-gold sm:h-2.5 sm:w-2.5" />
-              <p className="eyebrow text-[9px] tracking-[0.16em] text-gold sm:text-[10px] sm:tracking-[0.2em]">
-                Interactive Frame Assembly · 60 FPS Scroll Scrub
+          <div className="relative z-20 mx-auto flex w-full max-w-[1600px] items-center justify-between gap-2 px-4 pt-16 sm:px-6 sm:pt-20 md:px-10 md:pt-22">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <span className="flex h-2 w-2 shrink-0 animate-pulse rounded-full bg-gold sm:h-2.5 sm:w-2.5" />
+              <p className="eyebrow truncate text-[9px] tracking-[0.12em] text-gold sm:text-[10px] sm:tracking-[0.2em]">
+                <span className="hidden sm:inline">Interactive </span>Frame Assembly<span className="hidden md:inline"> · 60 FPS Scroll Scrub</span>
               </p>
             </div>
 
             {/* Quick Controls */}
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 onClick={togglePlay}
                 aria-label={isPlaying ? "Pause assembly animation" : "Play assembly animation"}
-                className="flex items-center gap-1.5 rounded-full border border-paper/20 bg-obsidian/80 px-3 py-1 text-[9px] uppercase tracking-wider text-paper backdrop-blur-md transition-all hover:border-gold hover:text-gold sm:px-3.5 sm:py-1.5"
+                className="flex items-center gap-1.5 rounded-full border border-paper/20 bg-obsidian/80 px-2.5 py-1 text-[9px] uppercase tracking-wider text-paper backdrop-blur-md transition-all hover:border-gold hover:text-gold sm:px-3.5 sm:py-1.5"
               >
                 {isPlaying ? <Pause size={10} /> : <Play size={10} />}
-                <span>{isPlaying ? "Pause" : "Auto Play"}</span>
+                <span>{isPlaying ? "Pause" : "Auto"}</span>
               </button>
               <button
                 onClick={handleReset}
@@ -309,7 +304,7 @@ export function Crafted() {
                 return (
                   <div
                     key={phase.step}
-                    className={`rounded border p-2 sm:p-2.5 md:p-3 backdrop-blur-md transition-all duration-300 ${
+                    className={`min-w-0 rounded border p-2 sm:p-2.5 md:p-3 backdrop-blur-md transition-all duration-300 ${
                       isCurrent
                         ? "border-gold bg-gold/20 text-paper shadow-lg shadow-gold/10"
                         : isPassed
@@ -317,9 +312,9 @@ export function Crafted() {
                         : "border-paper/10 bg-obsidian/40 text-steel/60"
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 sm:gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
                       <span
-                        className={`font-mono text-xs font-bold ${
+                        className={`shrink-0 font-mono text-xs font-bold ${
                           isCurrent ? "text-gold" : "text-steel"
                         }`}
                       >
