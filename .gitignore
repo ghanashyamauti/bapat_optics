@@ -1,0 +1,47 @@
+# Environment & Secrets
+.env
+.env.*
+*.env
+backend/.env
+landing/.env
+bapat-optics-landing/.env
+store/.env
+admin/.env
+
+# Databases & local state
+*.db
+*.sqlite
+*.sqlite3
+backend/*.db
+test.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# Node & Build artifacts
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.output/
+**/.output/
+.nitro/
+**/.nitro/
+.wrangler/
+**/.wrangler/
+
+# Uploads & Media cache
+backend/app/uploads/*
+!backend/app/uploads/.gitkeep
+
+# System & IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
