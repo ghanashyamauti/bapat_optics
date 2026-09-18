@@ -1,25 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { X, Eye, MessageCircle, Sparkles, Check, ArrowUpRight, ShoppingBag, Share2 } from "lucide-react";
+import { X, Eye, MessageCircle, Sparkles, Check, ArrowUpRight, ShoppingBag, Share2, Compass } from "lucide-react";
 import { inr, products as fallbackProducts } from "@/data/site";
 import { usePrefersReducedMotion } from "./hooks";
 import { LandingInquiryModal } from "./LandingInquiryModal";
+import { Magnetic } from "./Magnetic";
 
 const FALLBACK_FRAME_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400" fill="none"><rect width="600" height="400" fill="%23F6F5F2"/><circle cx="210" cy="200" r="65" stroke="%230A0A0A" stroke-width="8" fill="white"/><circle cx="390" cy="200" r="65" stroke="%230A0A0A" stroke-width="8" fill="white"/><path d="M275 190 Q300 175 325 190" stroke="%23C6A15B" stroke-width="6" stroke-linecap="round" fill="none"/><path d="M145 195 L90 185" stroke="%230A0A0A" stroke-width="6" stroke-linecap="round"/><path d="M455 195 L510 185" stroke="%230A0A0A" stroke-width="6" stroke-linecap="round"/><text x="300" y="310" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="600" fill="%23A4813E" letter-spacing="3">BAPAT OPTICS · PUNE</text><text x="300" y="335" text-anchor="middle" font-family="sans-serif" font-size="11" fill="%23666666">Carl Zeiss Vision Center</text></svg>`;
 
 export interface LandingProduct {
   id: string;
-  sku?: string;
+  sku?: string | undefined;
   name: string;
   brand: string;
   price: number;
-  sale_price?: number;
+  sale_price?: number | undefined;
   category: string;
-  categorySlug?: string;
+  categorySlug?: string | undefined;
   image: string;
-  imageAlt?: string;
+  imageAlt?: string | undefined;
   material: string;
-  dimensions_str?: string;
+  dimensions_str?: string | undefined;
 }
 
 function ProductVisual({ product, hovered }: { product: LandingProduct; hovered: boolean }) {
@@ -70,19 +71,53 @@ function ProductCard({
   storeUrl: string;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [tilt, setTilt] = useState({ rx: 0, ry: 0, glintX: 50, glintY: 50, active: false });
   const reduced = usePrefersReducedMotion();
   const directStoreProductUrl = `${storeUrl}/?product=${encodeURIComponent(product.id)}`;
 
+  const handleMouseMove = (e: React.MouseEvent<HTMLElement>) => {
+    if (reduced) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    setTilt({
+      rx: (y - 0.5) * -12,
+      ry: (x - 0.5) * 12,
+      glintX: x * 100,
+      glintY: y * 100,
+      active: true,
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setTilt({ rx: 0, ry: 0, glintX: 50, glintY: 50, active: false });
+    setHovered(false);
+  };
+
   return (
-    <motion.article
-      initial={reduced ? false : { opacity: 0, y: 30 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-60px" }}
-      transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+    <article
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="group flex flex-col justify-between overflow-hidden rounded-xl border border-obsidian/10 bg-paper shadow-sm transition-all duration-500 hover:border-gold/60 hover:shadow-xl hover:shadow-gold/5"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      style={{
+        transform: tilt.active
+          ? `perspective(1000px) rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg) scale3d(1.02, 1.02, 1.02)`
+          : "perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)",
+        transition: tilt.active
+          ? "transform 0.12s cubic-bezier(0.2, 0, 0, 1)"
+          : "transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s, box-shadow 0.4s",
+      }}
+      className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-obsidian/10 bg-paper shadow-sm transition-all duration-500 hover:border-gold/60 hover:shadow-xl hover:shadow-gold/5 will-change-transform"
     >
+      {/* Specular Ambient Glint on Hover */}
+      {tilt.active && (
+        <div
+          className="pointer-events-none absolute inset-0 z-20 transition-opacity duration-200"
+          style={{
+            background: `radial-gradient(circle at ${tilt.glintX}% ${tilt.glintY}%, rgba(212, 175, 55, 0.14) 0%, transparent 65%)`,
+          }}
+        />
+      )}
       <div className="relative">
         {/* Badges */}
         <div className="absolute left-3.5 top-3.5 z-10 flex max-w-[calc(100%-3.5rem)] flex-wrap gap-1.5 pointer-events-none">
@@ -126,9 +161,11 @@ function ProductCard({
               hovered ? "opacity-100" : "pointer-events-none opacity-0"
             }`}
           >
-            <span className="eyebrow flex items-center gap-1.5 rounded-full bg-paper px-4 py-2 text-[9px] font-semibold text-obsidian shadow-lg transition-transform duration-300 group-hover:scale-105">
-              <Eye size={12} className="text-gold" /> Quick View
-            </span>
+            <Magnetic maxDisplacement={12} proximity={80}>
+              <span className="eyebrow flex items-center gap-1.5 rounded-full bg-paper px-4 py-2 text-[9px] font-semibold text-obsidian shadow-lg transition-transform duration-300 group-hover:scale-105">
+                <Eye size={12} className="text-gold" /> Quick View
+              </span>
+            </Magnetic>
           </div>
         </button>
       </div>
@@ -162,7 +199,7 @@ function ProductCard({
             {product.material}
           </p>
 
-          <div className="mt-4 flex items-center gap-1.5 text-[10px] text-emerald-700 font-medium">
+          <div className="mt-4 flex items-center gap-1.5 text-[10px] text-success font-medium">
             <Check size={12} className="shrink-0" />
             <span>Available for Try-On at Kothrud & Sadashiv Peth</span>
           </div>
@@ -170,24 +207,28 @@ function ProductCard({
 
         {/* Action Buttons */}
         <div className="mt-5 grid grid-cols-2 gap-2 border-t border-obsidian/10 pt-4">
-          <a
-            href={directStoreProductUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="eyebrow inline-flex items-center justify-center gap-1.5 rounded border border-obsidian bg-obsidian py-2.5 text-[9px] font-bold text-paper transition-all hover:bg-gold hover:border-gold hover:text-obsidian shadow-xs"
-          >
-            <ShoppingBag size={12} /> Buy Now
-          </a>
-          <button
-            type="button"
-            onClick={() => onEnquire(product)}
-            className="eyebrow inline-flex items-center justify-center gap-1.5 rounded border border-obsidian/20 bg-transparent py-2.5 text-[9px] font-bold text-obsidian transition-colors hover:border-[#25D366] hover:text-[#25D366] hover:bg-[#25D366]/5 cursor-pointer"
-          >
-            <MessageCircle size={12} className="text-[#25D366]" /> Enquire
-          </button>
+          <Magnetic className="w-full">
+            <a
+              href={directStoreProductUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="eyebrow flex w-full items-center justify-center gap-1.5 rounded border border-obsidian bg-obsidian py-2.5 text-[9px] font-bold text-paper transition-all hover:bg-gold hover:border-gold hover:text-obsidian shadow-xs"
+            >
+              <ShoppingBag size={12} /> Buy Now
+            </a>
+          </Magnetic>
+          <Magnetic className="w-full">
+            <button
+              type="button"
+              onClick={() => onEnquire(product)}
+              className="eyebrow flex w-full items-center justify-center gap-1.5 rounded border border-obsidian/20 bg-transparent py-2.5 text-[9px] font-bold text-obsidian transition-colors hover:border-whatsapp hover:text-whatsapp hover:bg-whatsapp/5 cursor-pointer"
+            >
+              <MessageCircle size={12} className="text-whatsapp" /> Enquire
+            </button>
+          </Magnetic>
         </div>
       </div>
-    </motion.article>
+    </article>
   );
 }
 
@@ -200,6 +241,7 @@ export function Collection() {
   const [topBrandsText, setTopBrandsText] = useState("Ray-Ban Meta, Tom Ford, Armani Exchange, Versace, Oakley & Mont Blanc");
   const [isLoading, setIsLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const reduced = usePrefersReducedMotion();
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -316,8 +358,115 @@ export function Collection() {
       .catch(() => undefined);
   }, [apiUrl]);
 
+  const gridRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // GSAP Scroll-Driven Magnetic Convergence Animation
+  useEffect(() => {
+    if (isLoading || newArrivals.length === 0 || reduced) return;
+
+    let ctx: { revert: () => void } | undefined;
+    let cancelled = false;
+
+    void (async () => {
+      const [{ default: gsap }, { ScrollTrigger }] = await Promise.all([
+        import("gsap"),
+        import("gsap/ScrollTrigger"),
+      ]);
+
+      if (cancelled) return;
+      gsap.registerPlugin(ScrollTrigger);
+
+      const gridEl = gridRef.current;
+      if (!gridEl) return;
+
+      const cardEls = cardRefs.current.filter(Boolean) as HTMLDivElement[];
+      if (cardEls.length === 0) return;
+
+      const isMobile = window.innerWidth < 640;
+      const isTablet = window.innerWidth < 1024 && !isMobile;
+
+      ctx = gsap.context(() => {
+        const tl = gsap.timeline({
+          scrollTrigger: {
+            trigger: gridEl,
+            start: "top 88%", // Begins as the section approaches viewport
+            end: "top 22%",   // Completes and locks cleanly into place
+            scrub: 0.9,       // Fluid spring scrubbing
+          },
+        });
+
+        // Distinct 6-directional convergence trajectories
+        const DESKTOP_TRAJECTORIES = [
+          { x: -280, y: -180, rot: -14, scale: 0.8 },  // Card 0: Top-Left diagonal
+          { x: 0,    y: -240, rot: 5,   scale: 0.85 }, // Card 1: Straight from Top
+          { x: 280,  y: -180, rot: 15,  scale: 0.8 },  // Card 2: Top-Right diagonal
+          { x: -260, y: 200,  rot: 10,  scale: 0.8 },  // Card 3: Bottom-Left diagonal
+          { x: 0,    y: 260,  rot: -6,  scale: 0.85 }, // Card 4: Straight from Bottom
+          { x: 260,  y: 200,  rot: -13, scale: 0.8 },  // Card 5: Bottom-Right diagonal
+        ];
+
+        cardEls.forEach((el, idx) => {
+          let fromX = 0;
+          let fromY = 0;
+          let fromRot = 0;
+          let fromScale = 0.82;
+
+          if (isMobile) {
+            // Mobile single column: alternate from left & right
+            fromX = idx % 2 === 0 ? -120 : 120;
+            fromY = -40;
+            fromRot = idx % 2 === 0 ? -6 : 6;
+            fromScale = 0.88;
+          } else if (isTablet) {
+            // Tablet 2 columns x 3 rows
+            const col = idx % 2;
+            const row = Math.floor(idx / 2);
+            fromX = col === 0 ? -220 : 220;
+            fromY = row === 0 ? -140 : row === 1 ? 0 : 140;
+            fromRot = col === 0 ? -8 : 8;
+            fromScale = 0.85;
+          } else {
+            const traj = DESKTOP_TRAJECTORIES[idx] || { x: 0, y: 0, rot: 0, scale: 1 };
+            fromX = traj.x;
+            fromY = traj.y;
+            fromRot = traj.rot;
+            fromScale = traj.scale;
+          }
+
+          tl.fromTo(
+            el,
+            {
+              x: fromX,
+              y: fromY,
+              rotation: fromRot,
+              scale: fromScale,
+              opacity: 0.12,
+              filter: "blur(6px)",
+            },
+            {
+              x: 0,
+              y: 0,
+              rotation: 0,
+              scale: 1,
+              opacity: 1,
+              filter: "blur(0px)",
+              ease: "power2.out",
+            },
+            0 // All cards fly simultaneously into their grid slots as user scrolls
+          );
+        });
+      }, gridEl);
+    })();
+
+    return () => {
+      cancelled = true;
+      ctx?.revert();
+    };
+  }, [isLoading, newArrivals, reduced]);
+
   return (
-    <section id="collection" className="relative bg-paper py-20 sm:py-28 lg:py-32">
+    <section id="collection" className="relative bg-paper py-20 sm:py-28 lg:py-32 overflow-x-clip">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         
         {/* Section Header */}
@@ -328,6 +477,10 @@ export function Collection() {
               <p className="eyebrow text-[9px] tracking-[0.18em] text-gold sm:text-[10px] sm:tracking-[0.2em]">
                 Live Storefront · Newly Arrived Silhouettes
               </p>
+              <span className="inline-flex items-center gap-1 rounded-full border border-gold/40 bg-gold/10 px-2.5 py-0.5 text-[8px] font-bold tracking-wider text-gold">
+                <Compass size={10} className="animate-spin text-gold" style={{ animationDuration: "12s" }} />
+                <span>Magnetic Convergence</span>
+              </span>
             </div>
             <h2 className="display mt-1.5 text-[10vw] text-obsidian sm:text-[7vw] md:text-[5vw]">
               New Arrivals
@@ -338,39 +491,64 @@ export function Collection() {
           </div>
 
           <div className="hidden sm:block">
-            <a
-              href={storeUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="eyebrow inline-flex items-center gap-2 rounded-full border border-obsidian/20 bg-paper px-5 py-2.5 text-[9px] font-bold tracking-wider text-obsidian hover:border-gold hover:text-gold transition-colors"
-            >
-              <span>View All Store Products</span>
-              <ArrowUpRight size={13} />
-            </a>
+            <Magnetic>
+              <a
+                href={storeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="eyebrow inline-flex items-center gap-2 rounded-full border border-obsidian/20 bg-paper px-5 py-2.5 text-[9px] font-bold tracking-wider text-obsidian hover:border-gold hover:text-gold transition-colors"
+              >
+                <span>View All Store Products</span>
+                <ArrowUpRight size={13} />
+              </a>
+            </Magnetic>
           </div>
         </div>
 
-        {/* 6 Newly Arrived Products Grid */}
-        {isLoading ? (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 sm:gap-8">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div key={i} className="h-96 rounded-xl bg-paper/60 border border-obsidian/10 animate-pulse" />
-            ))}
+        {/* 6 Newly Arrived Products Grid with Magnetic Convergence */}
+        <div className="relative">
+          {/* Central Optical Gravitational Node */}
+          <div className="pointer-events-none absolute inset-0 -z-0 flex items-center justify-center overflow-hidden opacity-30">
+            <div className="relative flex items-center justify-center">
+              <div className="h-80 w-80 rounded-full border border-dashed border-gold/35 animate-[spin_90s_linear_infinite]" />
+              <div className="absolute h-56 w-56 rounded-full border border-gold/25" />
+              <div className="absolute h-32 w-32 rounded-full border border-gold/40 animate-pulse" />
+              <div className="absolute h-2 w-2 rounded-full bg-gold shadow-[0_0_12px_rgba(212,175,55,0.8)]" />
+              <div className="absolute -top-7 flex items-center gap-1.5 text-[8px] uppercase tracking-[0.28em] text-gold/80 font-mono">
+                <span>✦ Optical Convergence Axis ✦</span>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 sm:gap-8">
-            {newArrivals.map((p) => (
-              <ProductCard 
-                key={p.id} 
-                product={p} 
-                onOpen={setActive} 
-                onEnquire={setInquiryProduct}
-                onShare={handleShareProduct}
-                storeUrl={storeUrl}
-              />
-            ))}
-          </div>
-        )}
+
+          {isLoading ? (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 sm:gap-8 relative z-10">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="h-96 rounded-xl bg-paper/60 border border-obsidian/10 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div ref={gridRef} className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 sm:gap-8 relative z-10">
+              {newArrivals.map((p, idx) => (
+                <div
+                  key={p.id}
+                  ref={(el) => {
+                    cardRefs.current[idx] = el;
+                  }}
+                  className="will-change-transform"
+                  style={{ transformOrigin: "center center" }}
+                >
+                  <ProductCard 
+                    product={p} 
+                    onOpen={setActive} 
+                    onEnquire={setInquiryProduct}
+                    onShare={handleShareProduct}
+                    storeUrl={storeUrl}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* In-Store Consultation & Full Catalog Banner */}
         <div className="mt-12 flex flex-col items-center justify-between gap-4 rounded-xl border border-gold/30 bg-paper p-6 sm:mt-16 sm:flex-row sm:p-8 shadow-sm">
@@ -389,15 +567,17 @@ export function Collection() {
           </div>
 
           <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
-            <a
-              href={storeUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="eyebrow inline-flex w-full items-center justify-center gap-2 rounded-full bg-obsidian px-5 py-3 text-center text-[9px] font-bold tracking-wide text-paper shadow-md transition-colors hover:bg-gold hover:text-obsidian sm:w-auto sm:px-6 sm:text-[10px]"
-            >
-              <span>Explore Full {totalProductsCount}+ Store Catalog</span>
-              <ArrowUpRight size={14} />
-            </a>
+            <Magnetic className="w-full sm:w-auto">
+              <a
+                href={storeUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="eyebrow flex w-full items-center justify-center gap-2 rounded-full bg-obsidian px-5 py-3 text-center text-[9px] font-bold tracking-wide text-paper shadow-md transition-colors hover:bg-gold hover:text-obsidian sm:w-auto sm:px-6 sm:text-[10px]"
+              >
+                <span>Explore Full {totalProductsCount}+ Store Catalog</span>
+                <ArrowUpRight size={14} />
+              </a>
+            </Magnetic>
           </div>
         </div>
       </div>
@@ -482,7 +662,7 @@ export function Collection() {
                       setActive(null);
                       setInquiryProduct(p);
                     }}
-                    className="eyebrow block w-full rounded border border-[#25D366] py-2.5 text-center text-[10px] font-bold text-[#25D366] hover:bg-[#25D366] hover:text-white transition-colors cursor-pointer"
+                    className="eyebrow block w-full rounded border border-whatsapp py-2.5 text-center text-[10px] font-bold text-whatsapp hover:bg-whatsapp hover:text-paper transition-colors cursor-pointer"
                   >
                     📱 Book In-Store Try-On & Consultation
                   </button>

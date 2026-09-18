@@ -1,18 +1,18 @@
 import React, { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { X, Sparkles, User, Phone, Mail, Building2, CheckCircle2, MessageCircle, ArrowRight, ShieldCheck } from "lucide-react";
 import { inr } from "@/data/site";
 
-const rawApiUrl = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api/v1").trim().replace(/\/+$/, '');
+const rawApiUrl = (import.meta.env["VITE_API_URL"] || "http://127.0.0.1:8000/api/v1").trim().replace(/\/+$/, '');
 const API_BASE_URL = rawApiUrl.endsWith('/api/v1') ? rawApiUrl : `${rawApiUrl}/api/v1`;
 
 export interface LandingInquiryProduct {
-  id?: string;
+  id?: string | undefined;
   name: string;
   brand: string;
-  sku?: string;
+  sku?: string | undefined;
   price: number;
-  image?: string;
+  image?: string | undefined;
 }
 
 interface LandingInquiryModalProps {
@@ -106,7 +106,7 @@ export const LandingInquiryModal: React.FC<LandingInquiryModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-paper hover:bg-gold hover:text-obsidian transition-colors cursor-pointer"
+              className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-paper/10 text-paper hover:bg-gold hover:text-obsidian transition-colors cursor-pointer"
             >
               <X size={16} />
             </button>
@@ -129,7 +129,7 @@ export const LandingInquiryModal: React.FC<LandingInquiryModalProps> = ({
           {/* Body */}
           <div className="p-5 overflow-y-auto space-y-4 text-xs">
             {/* Product Card Snapshot */}
-            <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-obsidian/10 shadow-xs">
+            <div className="flex items-center gap-3 bg-paper p-3 rounded-xl border border-obsidian/10 shadow-xs">
               {product.image && (
                 <img
                   src={product.image}
@@ -160,7 +160,7 @@ export const LandingInquiryModal: React.FC<LandingInquiryModalProps> = ({
             {submittedData ? (
               /* Success View */
               <div className="text-center py-4 space-y-4">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-success-soft text-success">
                   <CheckCircle2 size={32} />
                 </div>
 
@@ -197,7 +197,7 @@ export const LandingInquiryModal: React.FC<LandingInquiryModalProps> = ({
                       href={submittedData.whatsapp_url}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex-1 flex items-center justify-center gap-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white py-3 rounded-xl font-bold tracking-wide transition-all shadow-md cursor-pointer"
+                      className="flex-1 flex items-center justify-center gap-2 bg-whatsapp hover:bg-whatsapp-strong text-paper py-3 rounded-xl font-bold tracking-wide transition-all shadow-md cursor-pointer"
                     >
                       <MessageCircle size={15} />
                       <span>Continue to WhatsApp Chat</span>
@@ -216,12 +216,12 @@ export const LandingInquiryModal: React.FC<LandingInquiryModalProps> = ({
               /* Inquiry Form */
               <form onSubmit={handleSubmit} className="space-y-3.5">
                 {errorMessage && (
-                  <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
+                  <div className="p-2.5 rounded-lg bg-danger-soft border border-destructive/25 text-xs text-destructive font-medium">
                     {errorMessage}
                   </div>
                 )}
 
-                <div className="space-y-2.5 bg-white p-3.5 rounded-xl border border-obsidian/10">
+                <div className="space-y-2.5 bg-paper p-3.5 rounded-xl border border-obsidian/10">
                   <div className="text-[11px] font-bold text-obsidian flex items-center gap-1.5">
                     <User size={13} className="text-gold" />
                     <span>Your Contact Information</span>
@@ -271,7 +271,7 @@ export const LandingInquiryModal: React.FC<LandingInquiryModalProps> = ({
                   </div>
                 </div>
 
-                <div className="space-y-2.5 bg-white p-3.5 rounded-xl border border-obsidian/10">
+                <div className="space-y-2.5 bg-paper p-3.5 rounded-xl border border-obsidian/10">
                   <div className="text-[11px] font-bold text-obsidian flex items-center gap-1.5">
                     <Building2 size={13} className="text-gold" />
                     <span>Store Preference & Trial Notes</span>

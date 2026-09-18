@@ -54,23 +54,22 @@ export function Manifesto() {
   }, [reduced]);
 
   return (
-    <section id="manifesto" className="w-full max-w-full overflow-hidden bg-bone py-16 sm:py-20 md:py-28">
-      <div ref={ref} className="mx-auto max-w-[1600px] px-5 sm:px-6 md:px-10">
-        <div className="grid gap-10 lg:grid-cols-12 lg:gap-14 lg:items-center">
+    <section id="manifesto" className="w-full max-w-full overflow-hidden bg-bone py-12 sm:py-20 md:py-28">
+      <div ref={ref} className="mx-auto max-w-[1600px] px-4 sm:px-6 md:px-10">
+        <div className="grid gap-8 sm:gap-10 lg:grid-cols-12 lg:gap-14 lg:items-center">
           
           {/* Left Column: Manifesto Headline & Philosophy */}
-          <div className="lg:col-span-7">
-            <p className="eyebrow mb-6 flex items-center gap-2.5 text-[9px] text-muted-foreground sm:mb-8 sm:text-[10px]">
-              <span className="inline-block h-px w-8 bg-gold sm:w-12" />
+          <div className="min-w-0 w-full lg:col-span-7">
+            <p className="eyebrow mb-3 sm:mb-6 flex items-center gap-2 text-[9px] text-muted-foreground sm:text-[10px]">
+              <span className="inline-block h-px w-6 sm:w-12 bg-gold" />
               The House View · Pune Heritage
             </p>
-            <h2 className="display text-[9vw] text-obsidian sm:text-[7vw] md:text-[4.6vw]">
+            <h2 className="display text-[1.45rem] xs:text-2xl sm:text-4xl md:text-5xl lg:text-[3.8vw] leading-[1.12] sm:leading-[1.08] text-obsidian tracking-tight">
               {lines.map((line, i) => (
-                <span key={line} className="reveal-line block">
+                <span key={line} className="reveal-line block overflow-hidden">
                   <span
                     data-line
-                    className="block translate-y-[110%] will-change-transform"
-                    style={i > 0 ? { color: "oklch(0.42 0.005 260)" } : undefined}
+                    className={`block translate-y-[110%] will-change-transform break-words ${i > 0 ? "text-muted-foreground" : ""}`}
                   >
                     {line}
                   </span>
@@ -78,30 +77,30 @@ export function Manifesto() {
               ))}
             </h2>
 
-            <p className="mt-6 max-w-xl text-xs leading-relaxed text-muted-foreground sm:text-sm">
+            <p className="mt-3 sm:mt-6 max-w-xl text-xs sm:text-sm leading-relaxed text-muted-foreground">
               At Bapat Optics, we believe eyewear is neither a medical chore nor fast fashion.
               For over 14 years across Kothrud and Sadashiv Peth, every pair of glasses is measured with micron-level digital precision, fitted to Indian facial ergonomics, and backed by lifetime in-house servicing.
             </p>
 
             {/* Core Values Grid */}
-            <div className="mt-8 grid gap-4 border-t border-obsidian/10 pt-6 sm:grid-cols-3">
-              <div className="flex flex-col gap-1">
+            <div className="mt-5 sm:mt-8 grid gap-3 sm:gap-4 border-t border-obsidian/10 pt-4 sm:pt-6 grid-cols-1 sm:grid-cols-3">
+              <div className="flex flex-col gap-0.5 sm:gap-1">
                 <span className="eyebrow flex items-center gap-1.5 text-[10px] font-semibold text-obsidian">
-                  <Eye size={13} className="text-gold" /> 100% Free
+                  <Eye size={13} className="shrink-0 text-gold" /> 100% Free
                 </span>
                 <p className="text-[11px] text-muted-foreground">Digital eye examinations at both stores</p>
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-0.5 sm:gap-1">
                 <span className="eyebrow flex items-center gap-1.5 text-[10px] font-semibold text-obsidian">
-                  <ShieldCheck size={13} className="text-gold" /> Lifetime Free
+                  <ShieldCheck size={13} className="shrink-0 text-gold" /> Lifetime Free
                 </span>
                 <p className="text-[11px] text-muted-foreground">In-house frame servicing & adjustments</p>
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-0.5 sm:gap-1">
                 <span className="eyebrow flex items-center gap-1.5 text-[10px] font-semibold text-obsidian">
-                  <Sparkles size={13} className="text-gold" /> Authorized
+                  <Sparkles size={13} className="shrink-0 text-gold" /> Authorized
                 </span>
                 <p className="text-[11px] text-muted-foreground">Armani, Versace, Line Art & Zeiss partner</p>
               </div>
@@ -109,22 +108,22 @@ export function Manifesto() {
           </div>
 
           {/* Right Column: Interactive 3D Spectacle GLB Showcase */}
-          <div className="lg:col-span-5">
-            <div className="relative overflow-hidden rounded-2xl border border-gold/30 bg-obsidian p-6 sm:p-7 shadow-2xl text-paper">
+          <div className="min-w-0 w-full lg:col-span-5">
+            <div className="relative overflow-hidden rounded-2xl border border-gold/30 bg-obsidian p-3.5 sm:p-6 md:p-7 shadow-2xl text-paper">
               
               {/* Header HUD */}
-              <div className="relative z-20 flex items-center justify-between border-b border-paper/10 pb-3.5">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 animate-ping rounded-full bg-gold" />
-                  <span className="eyebrow text-[9px] tracking-wider text-gold">3D Interactive Viewer</span>
+              <div className="relative z-20 flex items-center justify-between gap-2 border-b border-paper/10 pb-2.5 sm:pb-3">
+                <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                  <span className="h-2 w-2 shrink-0 animate-ping rounded-full bg-gold" />
+                  <span className="eyebrow truncate text-[8.5px] sm:text-[9px] tracking-wider text-gold">3D Interactive Viewer</span>
                 </div>
 
                 {/* View Mode Switcher */}
-                <div className="flex items-center gap-1.5 rounded-full border border-paper/15 bg-paper/5 p-1 text-[8px]">
+                <div className="flex shrink-0 items-center gap-1 rounded-full border border-paper/15 bg-paper/5 p-0.5 sm:p-1 text-[8px] sm:text-[9px]">
                   <button
                     type="button"
                     onClick={() => setViewMode("3d")}
-                    className={`flex items-center gap-1 rounded-full px-2.5 py-0.5 transition-all ${
+                    className={`flex items-center gap-1 rounded-full px-2 sm:px-2.5 py-0.5 transition-all ${
                       viewMode === "3d" ? "bg-gold text-obsidian font-semibold" : "text-steel hover:text-paper"
                     }`}
                   >
@@ -133,7 +132,7 @@ export function Manifesto() {
                   <button
                     type="button"
                     onClick={() => setViewMode("photo")}
-                    className={`rounded-full px-2.5 py-0.5 transition-all ${
+                    className={`rounded-full px-2 sm:px-2.5 py-0.5 transition-all ${
                       viewMode === "photo" ? "bg-gold text-obsidian font-semibold" : "text-steel hover:text-paper"
                     }`}
                   >
@@ -143,28 +142,28 @@ export function Manifesto() {
               </div>
 
               {/* 3D GLB Model Viewport or Studio Photo */}
-              <div className="relative my-4 aspect-[4/3] w-full overflow-hidden rounded-xl bg-obsidian/90">
+              <div className="relative my-2.5 sm:my-4 aspect-[4/3] sm:aspect-[16/11] md:aspect-[4/3] min-h-[190px] sm:min-h-[220px] w-full overflow-hidden rounded-xl bg-obsidian/90">
                 {viewMode === "3d" ? (
                   <GlassesViewer3D modelUrl="/models/Glasses.glb" className="h-full w-full" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center p-4">
                     <img
-                      src="/showcase-frame.webp"
+                      src={product2}
                       alt="Actual luxury optical frame at Bapat Optics"
-                      className="h-full w-full object-contain filter drop-shadow-[0_15px_25px_rgba(0,0,0,0.8)] transition-all duration-500 hover:scale-105"
+                      className="h-full w-full object-contain shadow-product transition-all duration-500 hover:scale-105"
                     />
                   </div>
                 )}
               </div>
 
               {/* Footer Tip */}
-              <div className="relative z-20 flex items-center justify-between border-t border-paper/10 pt-3 text-[9px]">
-                <span className="text-steel">
+              <div className="relative z-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 border-t border-paper/10 pt-2 sm:pt-2.5 text-[9px]">
+                <span className="text-steel text-[8px] sm:text-[9px]">
                   {viewMode === "3d"
-                    ? "Drag anywhere to rotate 360° · Pinch or scroll to zoom"
+                    ? "Drag anywhere to rotate 360° · Pinch to zoom"
                     : "Studio capture · Italian Mazzucchelli acetate"}
                 </span>
-                <span className="font-mono text-gold">GLB 3D Ready</span>
+                <span className="shrink-0 font-mono text-[8px] sm:text-[9px] text-gold">GLB 3D Ready</span>
               </div>
             </div>
           </div>

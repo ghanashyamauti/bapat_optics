@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { motion } from "motion/react";
 import { ArrowDown } from "lucide-react";
 import { whatsappUrl } from "@/data/site";
+import { Magnetic } from "./Magnetic";
 
 const word = {
   hidden: { y: "110%" },
@@ -20,19 +21,11 @@ export function Hero() {
       id="top"
       className="relative min-h-[100svh] w-full overflow-hidden bg-obsidian grain"
     >
-      {/* depth field */}
-      <div className="absolute inset-0 bg-[radial-gradient(120%_80%_at_50%_0%,color-mix(in_oklab,var(--charcoal)_100%,transparent),var(--obsidian)_70%)]" />
-      <div
-        className="absolute inset-0 opacity-[0.16]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, color-mix(in oklab, var(--steel) 22%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--steel) 22%, transparent) 1px, transparent 1px)",
-          backgroundSize: "88px 88px",
-          maskImage: "radial-gradient(70% 60% at 50% 45%, black, transparent 75%)",
-        }}
-      />
-
-
+      <div className="absolute inset-0 bg-obsidian">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(197,168,128,0.08)_0%,rgba(13,13,15,0.95)_65%,#0d0d0f_100%)]" />
+      </div>
+      <div className="absolute inset-0 hero-depth opacity-60" />
+      <div className="absolute inset-0 hero-grid opacity-[0.13]" />
 
       {/* kinetic background word */}
       <div className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 overflow-hidden">
@@ -97,23 +90,27 @@ export function Hero() {
             transition={{ delay: 2.15, duration: 0.9 }}
             className="flex flex-col gap-2.5 sm:flex-row sm:gap-3"
           >
-            <a
-              href="#collection"
-              data-cursor="VIEW"
-              className="eyebrow group relative overflow-hidden bg-paper px-8 py-3.5 text-center text-[10px] text-obsidian sm:px-9 sm:py-4"
-            >
-              <span className="relative z-10">Explore Collection</span>
-              <span className="absolute inset-0 -translate-x-full bg-gold transition-transform duration-500 group-hover:translate-x-0" />
-            </a>
-            <a
-              href={whatsappUrl("Hello Bapat Optics, I'd like to book an eye exam.")}
-              target="_blank"
-              rel="noreferrer"
-              data-cursor="BOOK"
-              className="eyebrow border border-paper/30 px-8 py-3.5 text-center text-[10px] text-paper transition-colors hover:border-gold hover:text-gold sm:px-9 sm:py-4"
-            >
-              Book Eye Exam
-            </a>
+            <Magnetic>
+              <a
+                href="#collection"
+                data-cursor="VIEW"
+                className="eyebrow group relative block overflow-hidden bg-paper px-8 py-3.5 text-center text-[10px] text-obsidian sm:px-9 sm:py-4"
+              >
+                <span className="relative z-10">Explore Collection</span>
+                <span className="absolute inset-0 -translate-x-full bg-gold transition-transform duration-500 group-hover:translate-x-0" />
+              </a>
+            </Magnetic>
+            <Magnetic>
+              <a
+                href={whatsappUrl("Hello Bapat Optics, I'd like to book an eye exam.")}
+                target="_blank"
+                rel="noreferrer"
+                data-cursor="BOOK"
+                className="eyebrow block border border-paper/30 px-8 py-3.5 text-center text-[10px] text-paper transition-colors hover:border-gold hover:text-gold sm:px-9 sm:py-4"
+              >
+                Book Eye Exam
+              </a>
+            </Magnetic>
           </motion.div>
         </div>
 

@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { ScanFace, Ruler, Sparkles, Glasses } from "lucide-react";
-import techImage from "@/assets/tech.jpg";
+import { VideoSlot } from "./VideoSlot";
 
 const steps = [
   {
@@ -49,15 +49,16 @@ export function EyeQ() {
           </div>
 
           <div className="lg:col-span-6">
-            <img
-              src={techImage}
-              alt="Optical lens held in a precision measurement instrument"
-              loading="lazy"
-              decoding="async"
-              width={1408}
-              height={1008}
-              className="w-full max-h-[300px] sm:max-h-[340px] rounded-2xl object-cover shadow-xs border border-obsidian/10"
-            />
+            {/* VIDEO SLOT 3 — eye-testing.mp4 (see VIDEO-GUIDE.md) */}
+            <VideoSlot
+              slot="eyeTesting"
+              className="h-[300px] w-full rounded-2xl border border-obsidian/10 shadow-xs sm:h-[340px]"
+            >
+              <div className="absolute inset-0 bg-gradient-to-t from-obsidian/70 via-transparent to-transparent" />
+              <p className="eyebrow absolute bottom-4 left-4 text-[9px] text-paper sm:bottom-5 sm:left-5">
+                Zeiss digital measurement suite
+              </p>
+            </VideoSlot>
           </div>
         </div>
 

@@ -55,12 +55,18 @@
 :root {
   --radius: 0.125rem;
 
-  --obsidian: oklch(0.145 0 0); /* #0A0A0A */
-  --charcoal: oklch(0.196 0 0); /* #141414 */
-  --paper: oklch(1 0 0); /* #FFFFFF */
-  --bone: oklch(0.965 0.005 85); /* #F6F5F2 */
-  --steel: oklch(0.782 0.008 250); /* #B8BCC2 */
-  --gold: oklch(0.725 0.078 82); /* #C6A15B */
+  --obsidian: oklch(0.145 0 0);
+  /* #0A0A0A */
+  --charcoal: oklch(0.196 0 0);
+  /* #141414 */
+  --paper: oklch(1 0 0);
+  /* #FFFFFF */
+  --bone: oklch(0.965 0.005 85);
+  /* #F6F5F2 */
+  --steel: oklch(0.782 0.008 250);
+  /* #B8BCC2 */
+  --gold: oklch(0.725 0.078 82);
+  /* #C6A15B */
   --gold-soft: oklch(0.86 0.045 85);
 
   --background: var(--bone);
@@ -127,12 +133,10 @@
 @utility hairline {
   height: 1px;
   width: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in oklab, var(--gold) 60%, transparent),
-    transparent
-  );
+  background: linear-gradient(90deg,
+      transparent,
+      color-mix(in oklab, var(--gold) 60%, transparent),
+      transparent);
 }
 
 /* Clip-based line reveal used across scroll storytelling */
@@ -143,6 +147,7 @@
 
 @utility grain {
   position: relative;
+
   &::after {
     content: "";
     position: absolute;
@@ -168,6 +173,7 @@
   from {
     transform: translateX(0);
   }
+
   to {
     transform: translateX(-50%);
   }
@@ -177,16 +183,19 @@
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
 }
 
 @keyframes bapat-sheen {
+
   0%,
   100% {
     transform: translateX(0) rotate(12deg);
   }
+
   55% {
     transform: translateX(420%) rotate(12deg);
   }
@@ -196,13 +205,37 @@
   html {
     scroll-behavior: auto;
   }
+
   .marquee-track {
     animation: none;
   }
+
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* Lenis Smooth Scroll Styles */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: clip;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
 }

@@ -166,24 +166,6 @@ export const contact = {
   officialWebsite: "https://www.bapatoptics.com/",
 };
 
-export const benefits = [
-  {
-    title: "100% Free Eye Checkup",
-    subtitle: "Certified Optometrists & Advanced Zeiss Machinery",
-    description: "Get a comprehensive digital eye evaluation at zero cost at both Pune locations.",
-  },
-  {
-    title: "Free In-House Servicing",
-    subtitle: "Lifetime Service & Repair Guarantee",
-    description: "Frame adjustments, nose pad replacements, screw tightening and sonic ultrasonic cleaning are always free.",
-  },
-  {
-    title: "Zeiss Precision Fitting",
-    subtitle: "VISUFIT 1000 & 3D 180° AI Measurement",
-    description: "Sub-millimetre lens centration for sharp, strain-free vision.",
-  },
-];
-
 export const categories: ProductCategory[] = [
   "Eyeglasses",
   "Sunglasses",
@@ -204,15 +186,12 @@ export const whatsappUrl = (message: string) =>
 
 /**
  * High-definition Video Assets
- * 1. frameAssembly: Scroll-driven interactive assembling showcase
- * 2. modelDesigner: Haute couture designer eyewear lifestyle showcase
  */
 export const media = {
-  frameAssembly: "/videos/frame-assembly.mp4",
   modelDesigner: "/videos/model-designer.mp4",
-  // Fallback aliases
-  productVideo: "/videos/frame-assembly.mp4",
-  lifestyleVideo: "/videos/model-designer.mp4",
-  logo: "/bapat-logo.png",
-  favicon: "/favicon.jpg",
+  eyeTesting: "/videos/eye-testing.mp4",
+  storeInterior: "/videos/store-interior.mp4",
+  productMacro: "/videos/product-macro.mp4",
+  customerFitting: "/videos/customer-fitting.mp4",
+  logoReveal: "/videos/logo-reveal.mp4",
 };

@@ -1,14 +1,22 @@
 import { useState } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { contact, stores, whatsappUrl } from "@/data/site";
+import { VideoSlot } from "./VideoSlot";
+import { Magnetic } from "./Magnetic";
 
 export function BookBand() {
   const [storeId, setStoreId] = useState(stores[0]?.id ?? "");
   const store = stores.find((s) => s.id === storeId) ?? stores[0];
+  const storeName = store?.name ?? "Pune";
 
   return (
-    <section className="w-full max-w-full overflow-hidden bg-obsidian py-14 grain sm:py-18 md:py-24">
-      <div className="mx-auto max-w-[1600px] px-5 sm:px-6 md:px-10">
+    <section className="relative w-full max-w-full overflow-hidden bg-obsidian py-14 grain sm:py-18 md:py-24">
+      {/* VIDEO SLOT 6 — customer-fitting.mp4 (see VIDEO-GUIDE.md) */}
+      <VideoSlot slot="customerFitting" className="absolute inset-0" mediaClassName="opacity-45">
+        <div className="absolute inset-0 bg-gradient-to-r from-obsidian via-obsidian/85 to-obsidian/70" />
+      </VideoSlot>
+
+      <div className="relative z-10 mx-auto max-w-[1600px] px-5 sm:px-6 md:px-10">
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">
             <p className="eyebrow mb-4 flex items-center gap-2.5 text-[9px] text-gold sm:mb-6 sm:text-[10px]">
@@ -38,25 +46,29 @@ export function BookBand() {
             </select>
 
             <div className="mt-3.5 flex flex-col gap-2.5 sm:flex-row">
-              <a
-                href={whatsappUrl(
-                  `Hello Bapat Optics, I'd like to book an eye exam at your ${store?.name ?? ""} store.`,
-                )}
-                target="_blank"
-                rel="noreferrer"
-                data-cursor="BOOK"
-                className="eyebrow inline-flex flex-1 items-center justify-center gap-2 rounded bg-gold px-6 py-3.5 text-[10px] font-semibold text-obsidian transition-opacity hover:opacity-90"
-              >
-                Book on WhatsApp <ArrowUpRight size={12} />
-              </a>
-              <a
-                href={`mailto:${contact.email}?subject=${encodeURIComponent(
-                  `Eye exam booking — ${store?.name ?? ""}`,
-                )}`}
-                className="eyebrow inline-flex flex-1 items-center justify-center rounded border border-paper/25 px-6 py-3.5 text-[10px] text-paper transition-colors hover:border-gold hover:text-gold"
-              >
-                Email us
-              </a>
+              <Magnetic className="flex-1">
+                <a
+                  href={whatsappUrl(
+                    `Hello Bapat Optics, I'd like to book an eye exam at your ${store?.name ?? ""} store.`,
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-cursor="BOOK"
+                  className="eyebrow flex w-full items-center justify-center gap-2 rounded bg-gold px-6 py-3.5 text-[10px] font-semibold text-obsidian transition-opacity hover:opacity-90"
+                >
+                  Book on WhatsApp <ArrowUpRight size={12} />
+                </a>
+              </Magnetic>
+              <Magnetic className="flex-1">
+                <a
+                  href={`mailto:${contact.email}?subject=${encodeURIComponent(
+                    `Eye exam booking — ${storeName}`,
+                  )}`}
+                  className="eyebrow flex w-full items-center justify-center rounded border border-paper/25 px-6 py-3.5 text-[10px] text-paper transition-colors hover:border-gold hover:text-gold"
+                >
+                  Email us
+                </a>
+              </Magnetic>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-steel">
               Our store optometrist team will confirm your preferred timing and prepare the testing suite.

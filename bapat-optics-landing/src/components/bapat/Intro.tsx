@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { usePrefersReducedMotion } from "./hooks";
+import { VideoSlot } from "./VideoSlot";
 
 /** ~1.5s logotype assembly. Click or press any key to skip. */
 export function Intro() {
@@ -40,6 +41,17 @@ export function Intro() {
           transition={{ duration: 0.85, ease: [0.76, 0, 0.24, 1] }}
           className="fixed inset-0 z-[200] flex cursor-pointer flex-col items-center justify-center bg-obsidian"
         >
+          {/* VIDEO SLOT 7 — logo-reveal.mp4 */}
+          <VideoSlot
+            slot="logoReveal"
+            priority
+            className="pointer-events-none absolute inset-0"
+            mediaClassName="opacity-35"
+          >
+            <div className="absolute inset-0 bg-obsidian/50" />
+          </VideoSlot>
+
+          <div className="relative z-10 flex flex-col items-center">
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -68,6 +80,7 @@ export function Intro() {
           >
             OPTICS · PUNE · SINCE 2011
           </motion.span>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

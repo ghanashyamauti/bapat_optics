@@ -53,14 +53,12 @@ export function CustomCursor() {
       style={{ opacity: visible ? 1 : 0, transition: "opacity 300ms" }}
     >
       <div
-        className={`flex items-center justify-center rounded-full border border-gold/70 bg-gold/10 backdrop-blur-[2px] transition-all duration-300 ${
-          label ? "h-20 w-20" : "h-2.5 w-2.5 bg-gold"
-        }`}
+        className={`flex items-center justify-center rounded-full border border-gold/70 bg-gold/10 backdrop-blur-[2px] transition-all duration-300 ${label ? "h-20 w-20" : "h-2.5 w-2.5 bg-gold"
+          }`}
       >
         <span
-          className={`eyebrow text-[9px] text-gold transition-opacity duration-200 ${
-            label ? "opacity-100" : "opacity-0"
-          }`}
+          className={`eyebrow text-[9px] text-gold transition-opacity duration-200 ${label ? "opacity-100" : "opacity-0"
+            }`}
         >
           {label}
         </span>

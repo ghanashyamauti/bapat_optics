@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, ArrowUpRight, Volume2, VolumeX, Shield, Eye } from "lucide-react";
-import campaignPoster from "@/assets/campaign-poster.jpg";
 import { media, whatsappUrl } from "@/data/site";
 import { usePrefersReducedMotion } from "./hooks";
+import { Magnetic } from "./Magnetic";
 
 export function Campaign() {
   const ref = useRef<HTMLElement>(null);
@@ -87,7 +87,6 @@ export function Campaign() {
         <video
           ref={videoRef}
           src={media.modelDesigner}
-          poster={campaignPoster}
           muted={muted}
           loop
           playsInline
@@ -145,21 +144,25 @@ export function Campaign() {
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3 sm:mt-8 sm:gap-4">
-            <a
-              href={whatsappUrl("Hello Bapat Optics, I want to try the designer frames featured in your campaign.")}
-              target="_blank"
-              rel="noreferrer"
-              data-cursor="BOOK"
-              className="eyebrow inline-flex items-center gap-2 bg-gold px-6 py-3.5 text-[10px] font-semibold text-obsidian transition-all hover:bg-gold-soft sm:px-8 sm:py-4"
-            >
-              Book In-Store Styling <ArrowUpRight size={13} />
-            </a>
-            <a
-              href="#stores"
-              className="eyebrow inline-flex items-center gap-2 border border-paper/30 bg-obsidian/60 px-6 py-3.5 text-[10px] text-paper backdrop-blur-md transition-colors hover:border-gold hover:text-gold sm:px-8 sm:py-4"
-            >
-              Visit Pune Stores
-            </a>
+            <Magnetic>
+              <a
+                href={whatsappUrl("Hello Bapat Optics, I want to try the designer frames featured in your campaign.")}
+                target="_blank"
+                rel="noreferrer"
+                data-cursor="BOOK"
+                className="eyebrow inline-flex items-center gap-2 bg-gold px-6 py-3.5 text-[10px] font-semibold text-obsidian transition-all hover:bg-gold-soft sm:px-8 sm:py-4"
+              >
+                Book In-Store Styling <ArrowUpRight size={13} />
+              </a>
+            </Magnetic>
+            <Magnetic>
+              <a
+                href="#stores"
+                className="eyebrow inline-flex items-center gap-2 border border-paper/30 bg-obsidian/60 px-6 py-3.5 text-[10px] text-paper backdrop-blur-md transition-colors hover:border-gold hover:text-gold sm:px-8 sm:py-4"
+              >
+                Visit Pune Stores
+              </a>
+            </Magnetic>
           </div>
         </div>
 

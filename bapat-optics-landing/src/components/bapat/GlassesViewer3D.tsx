@@ -28,13 +28,15 @@ export function GlassesViewer3D({
     let animationFrameId: number;
     const width = container.clientWidth || 400;
     const height = container.clientHeight || 400;
+    const aspect = width / height;
 
     // 1. Scene setup
     const scene = new THREE.Scene();
 
-    // 2. Camera setup
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-    camera.position.set(0, 0.4, 2.5);
+    // 2. Camera setup with responsive distance
+    const camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+    const initialZ = aspect < 1.1 ? 3.0 : 2.5;
+    camera.position.set(0, 0.35, initialZ);
     cameraRef.current = camera;
 
     // 3. WebGL Renderer
@@ -48,6 +50,8 @@ export function GlassesViewer3D({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.3;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Allow natural page scrolling when swiping vertically on mobile
+    renderer.domElement.style.touchAction = "pan-y";
     rendererRef.current = renderer;
 
     container.appendChild(renderer.domElement);
@@ -143,7 +147,9 @@ export function GlassesViewer3D({
       for (const entry of entries) {
         const { width: newW, height: newH } = entry.contentRect;
         if (newW > 0 && newH > 0) {
-          camera.aspect = newW / newH;
+          const newAspect = newW / newH;
+          camera.aspect = newAspect;
+          camera.position.z = newAspect < 1.1 ? 3.0 : 2.5;
           camera.updateProjectionMatrix();
           renderer.setSize(newW, newH);
         }
@@ -170,8 +176,11 @@ export function GlassesViewer3D({
   }, [autoRotate]);
 
   const handleResetCamera = () => {
-    if (cameraRef.current && controlsRef.current) {
-      cameraRef.current.position.set(0, 0.4, 2.5);
+    if (cameraRef.current && controlsRef.current && containerRef.current) {
+      const w = containerRef.current.clientWidth || 300;
+      const h = containerRef.current.clientHeight || 240;
+      const asp = w / h;
+      cameraRef.current.position.set(0, 0.35, asp < 1.1 ? 3.0 : 2.5);
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
@@ -189,7 +198,7 @@ export function GlassesViewer3D({
   return (
     <div className={`relative flex flex-col items-center justify-center overflow-hidden rounded-2xl bg-obsidian ${className}`}>
       {/* Background Radial Glow */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(212,175,55,0.22)_0%,transparent_70%)]" />
+      <div className="pointer-events-none absolute inset-0 golden-glow opacity-80" />
 
       {/* Loading Overlay */}
       {loading && (
@@ -201,7 +210,7 @@ export function GlassesViewer3D({
 
       {/* Error Fallback */}
       {loadError && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center p-4 text-center text-xs text-red-400">
+        <div className="absolute inset-0 z-20 flex items-center justify-center p-4 text-center text-xs text-destructive">
           {loadError}
         </div>
       )}
@@ -213,19 +222,19 @@ export function GlassesViewer3D({
       />
 
       {/* Floating HUD Controls */}
-      <div className="pointer-events-auto absolute bottom-3.5 left-3.5 right-3.5 z-10 flex items-center justify-between rounded-xl border border-paper/15 bg-obsidian/80 px-3.5 py-2 backdrop-blur-md">
-        <div className="flex items-center gap-2">
+      <div className="pointer-events-auto absolute bottom-2 left-2 right-2 sm:bottom-3.5 sm:left-3.5 sm:right-3.5 z-10 flex items-center justify-between gap-1 rounded-xl border border-paper/15 bg-obsidian/85 px-2 py-1 sm:px-3.5 sm:py-2 backdrop-blur-md">
+        <div className="flex items-center gap-1 sm:gap-2">
           <button
             type="button"
             onClick={() => setAutoRotate((prev) => !prev)}
-            className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[9px] uppercase tracking-wider transition-colors ${
+            className={`flex items-center gap-1 sm:gap-1.5 rounded-md border px-1.5 sm:px-2.5 py-0.5 sm:py-1 text-[8px] sm:text-[9px] uppercase tracking-wider transition-colors ${
               autoRotate
                 ? "border-gold bg-gold/20 text-gold"
                 : "border-paper/20 bg-paper/5 text-paper hover:border-gold hover:text-gold"
             }`}
           >
-            <RotateCw size={10} className={autoRotate ? "animate-spin" : ""} style={autoRotate ? { animationDuration: "6s" } : undefined} />
-            <span>{autoRotate ? "Auto Spin" : "Orbit Mode"}</span>
+            <RotateCw size={10} className={autoRotate ? "animate-[bapat-spin_6s_linear_infinite]" : ""} />
+            <span>{autoRotate ? "Auto Spin" : "Orbit"}</span>
           </button>
 
           <button
@@ -233,9 +242,9 @@ export function GlassesViewer3D({
             onClick={handleResetCamera}
             title="Reset View"
             aria-label="Reset View"
-            className="rounded-md border border-paper/20 bg-paper/5 p-1 text-paper transition-colors hover:border-gold hover:text-gold"
+            className="rounded-md border border-paper/20 bg-paper/5 p-0.5 sm:p-1 text-paper transition-colors hover:border-gold hover:text-gold"
           >
-            <RotateCcw size={11} />
+            <RotateCcw size={10} />
           </button>
         </div>
 
@@ -245,18 +254,18 @@ export function GlassesViewer3D({
             onClick={() => handleZoom(0.3)}
             title="Zoom In"
             aria-label="Zoom In"
-            className="rounded-md border border-paper/20 bg-paper/5 p-1 text-paper transition-colors hover:border-gold hover:text-gold"
+            className="rounded-md border border-paper/20 bg-paper/5 p-0.5 sm:p-1 text-paper transition-colors hover:border-gold hover:text-gold"
           >
-            <ZoomIn size={11} />
+            <ZoomIn size={10} />
           </button>
           <button
             type="button"
             onClick={() => handleZoom(-0.3)}
             title="Zoom Out"
             aria-label="Zoom Out"
-            className="rounded-md border border-paper/20 bg-paper/5 p-1 text-paper transition-colors hover:border-gold hover:text-gold"
+            className="rounded-md border border-paper/20 bg-paper/5 p-0.5 sm:p-1 text-paper transition-colors hover:border-gold hover:text-gold"
           >
-            <ZoomOut size={11} />
+            <ZoomOut size={10} />
           </button>
         </div>
       </div>
