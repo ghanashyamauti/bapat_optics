@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Play, Pause, RotateCcw, Wrench, ShieldCheck, Sparkles, Layers } from "lucide-react";
+import { Play, Pause, RotateCcw } from "lucide-react";
 import { usePrefersReducedMotion } from "./hooks";
 import { useLenis } from "./SmoothScroll";
 
@@ -447,6 +447,8 @@ export function Crafted() {
               {/* Cinematic Gradient Overlays for contrast & elegance */}
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-obsidian/80 via-transparent to-obsidian/50 md:from-obsidian/95 md:to-obsidian/70" />
               <div className="pointer-events-none absolute inset-0 cinematic-vignette opacity-60 md:opacity-100" />
+              {/* Top ambient gold light matching the Hero exit lens flare */}
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-[radial-gradient(ellipse_at_50%_0%,rgba(212,175,55,0.15)_0%,transparent_70%)]" />
             </div>
           </div>
 
@@ -500,43 +502,6 @@ export function Crafted() {
         </div>
       </div>
 
-      {/* Detail Callouts Grid */}
-      <div className="relative z-20 border-t border-paper/10 bg-obsidian">
-        <div className="mx-auto grid max-w-[1600px] gap-px bg-paper/10 sm:grid-cols-2 md:grid-cols-4">
-          <div className="bg-obsidian p-6 sm:p-7 md:p-8">
-            <Layers className="text-gold" size={20} />
-            <span className="eyebrow mt-3 block text-[9px] text-gold">01 · Material</span>
-            <h3 className="display mt-1 text-xl sm:text-2xl text-paper">Block-Cut Acetate</h3>
-            <p className="mt-2 text-xs leading-relaxed text-steel">
-              High-density Italian Mazzucchelli acetate, aged and tumbled in beechwood chips for a silky, warm finish.
-            </p>
-          </div>
-          <div className="bg-obsidian p-6 sm:p-7 md:p-8">
-            <Wrench className="text-gold" size={20} />
-            <span className="eyebrow mt-3 block text-[9px] text-gold">02 · Mechanics</span>
-            <h3 className="display mt-1 text-xl sm:text-2xl text-paper">5-Barrel Hinges</h3>
-            <p className="mt-2 text-xs leading-relaxed text-steel">
-              Double-pinned German barrel hinges designed to withstand over 50,000 open-close movements without loosening.
-            </p>
-          </div>
-          <div className="bg-obsidian p-6 sm:p-7 md:p-8">
-            <Sparkles className="text-gold" size={20} />
-            <span className="eyebrow mt-3 block text-[9px] text-gold">03 · Optics</span>
-            <h3 className="display mt-1 text-xl sm:text-2xl text-paper">Zeiss Precision</h3>
-            <p className="mt-2 text-xs leading-relaxed text-steel">
-              Zero-distortion optics calibrated with Zeiss 3D Visufit instruments for pure clarity and eye relaxation.
-            </p>
-          </div>
-          <div className="bg-obsidian p-6 sm:p-7 md:p-8">
-            <ShieldCheck className="text-gold" size={20} />
-            <span className="eyebrow mt-3 block text-[9px] text-gold">04 · Assurance</span>
-            <h3 className="display mt-1 text-xl sm:text-2xl text-paper">Lifetime Service</h3>
-            <p className="mt-2 text-xs leading-relaxed text-steel">
-              Free lifetime repairs, ultrasonic cleanings, screw resets, and adjustments at both Pune branch locations.
-            </p>
-          </div>
-        </div>
-      </div>
     </section>
   );
 }
