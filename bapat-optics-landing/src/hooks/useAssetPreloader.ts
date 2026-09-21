@@ -59,10 +59,11 @@ export function useAssetPreloader({
           );
         }
 
-        // 4. Preload 3D model in background
+        // 4. Preload 3D model & portal video in background
         if (typeof window !== "undefined") {
           promises.push(
-            fetch("/models/Glasses.glb", { method: "HEAD" }).catch(() => null)
+            fetch("/models/Glasses.glb", { method: "HEAD" }).catch(() => null),
+            fetch("/videos/bapat-brand-portal.mp4", { method: "HEAD" }).catch(() => null)
           );
         }
 

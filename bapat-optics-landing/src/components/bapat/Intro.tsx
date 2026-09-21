@@ -16,15 +16,15 @@ export function Intro() {
   const [isExiting, setIsExiting] = useState(false);
 
   const { progress, percentage, isReady, isDone, skip } = useAssetPreloader({
-    minDurationMs: 2000,
-    maxDurationMs: 3600,
+    minDurationMs: 4800,
+    maxDurationMs: 6500,
   });
 
   const handleComplete = useCallback(() => {
     setIsExiting(true);
     const t = setTimeout(() => {
       setOpen(false);
-    }, 650);
+    }, 750);
     return () => clearTimeout(t);
   }, []);
 

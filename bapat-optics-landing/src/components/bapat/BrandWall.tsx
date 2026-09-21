@@ -1,7 +1,5 @@
-import { BrandSpiral } from "./BrandSpiral";
+import { BrandFilmScrub } from "./BrandFilmScrub";
 
 export function BrandWall() {
-  return <BrandSpiral />;
+  return <BrandFilmScrub />;
 }
-
-
