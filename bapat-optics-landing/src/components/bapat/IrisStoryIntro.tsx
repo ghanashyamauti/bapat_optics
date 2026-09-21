@@ -15,15 +15,15 @@ interface CinematicLine {
 
 const cinematicLines: CinematicLine[] = [
   {
-    range: [0.08, 0.28],
+    range: [0.06, 0.32],
     text: "Every gaze is singular.",
   },
   {
-    range: [0.34, 0.54],
+    range: [0.35, 0.60],
     text: "Calibrated to your living eye.",
   },
   {
-    range: [0.60, 0.80],
+    range: [0.63, 0.83],
     text: "Vision refined into art.",
   },
 ];
@@ -315,15 +315,11 @@ export function IrisStoryOverlay({
             {activeLine && !isTransitioning && (
               <motion.h2
                 key={activeLine.text}
-                initial={{ opacity: 0, y: 28, filter: "blur(16px)", scale: 0.96 }}
+                initial={{ opacity: 0, y: 20, filter: "blur(8px)", scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)", scale: 1 }}
-                exit={{ opacity: 0, y: -22, filter: "blur(14px)", scale: 1.02 }}
-                transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-                className="display text-[clamp(2.2rem,6vw,4.6rem)] text-paper font-light tracking-[-0.03em] leading-[1.08] select-none"
-                style={{
-                  textShadow:
-                    "0 4px 35px rgba(0,0,0,0.95), 0 0 70px rgba(0,0,0,0.95), 0 0 25px rgba(198,161,91,0.22)",
-                }}
+                exit={{ opacity: 0, y: -16, filter: "blur(8px)", scale: 1.01 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="display text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-light tracking-tight text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.9)]"
               >
                 {activeLine.text}
               </motion.h2>

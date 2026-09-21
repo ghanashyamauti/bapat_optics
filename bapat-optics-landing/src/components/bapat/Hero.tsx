@@ -8,7 +8,7 @@ import { useLenis } from "./SmoothScroll";
 import { IrisStoryOverlay } from "./IrisStoryIntro";
 
 const TOTAL_FRAMES = 240;
-const PORTAL_END = 0.28;
+const PORTAL_END = 0.45;
 
 const checkIsMobileTier = () => {
   if (typeof window === "undefined") return false;
@@ -361,8 +361,8 @@ export function Hero() {
       id="eyewear-hero"
       className="relative w-full bg-obsidian text-paper"
       style={{
-        // 460vh: 120vh for the Iris Story & Portal, 340vh for the 360° frame scrub
-        height: "460vh",
+        // 660vh: 297vh for the Iris Story & Portal, 363vh for the 360° frame scrub
+        height: "660vh",
       }}
     >
       {/* Sticky 100svh Viewport Container */}
