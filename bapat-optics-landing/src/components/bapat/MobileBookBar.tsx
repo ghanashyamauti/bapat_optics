@@ -10,10 +10,23 @@ export function MobileBookBar() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    const update = () => setShow(window.scrollY > window.innerHeight * 0.9);
+    const update = () => {
+      const hero = document.getElementById("top");
+      if (hero) {
+        const rect = hero.getBoundingClientRect();
+        // The hero container is 360vh tall. rect.bottom is <= window.innerHeight * 0.1 only after hero completes and next section is active
+        setShow(rect.bottom <= window.innerHeight * 0.1);
+      } else {
+        setShow(window.scrollY > window.innerHeight * 3.5);
+      }
+    };
     update();
     window.addEventListener("scroll", update, { passive: true });
-    return () => window.removeEventListener("scroll", update);
+    window.addEventListener("resize", update, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
   }, []);
 
   return (
