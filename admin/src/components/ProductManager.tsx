@@ -30,6 +30,7 @@ import {
   updateProductStock
 } from '../services/adminApi';
 import { useAdminAuth } from '../context/AdminAuthContext';
+import { TryOnCalibrator } from './TryOnCalibrator';
 
 export const ProductManager: React.FC = () => {
   const { showToast } = useAdminAuth();
@@ -74,6 +75,12 @@ export const ProductManager: React.FC = () => {
   // Media States (Upload Only, Max 8 Photos, 1 Video)
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [uploadedVideo, setUploadedVideo] = useState<string | null>(null);
+
+  // 3D Virtual Try-On Asset & Calibration States
+  const [tryonImageUrl, setTryonImageUrl] = useState<string | null>(null);
+  const [tryonBridgeX, setTryonBridgeX] = useState<number>(0.5);
+  const [tryonBridgeY, setTryonBridgeY] = useState<number>(0.45);
+  const [tryonScale, setTryonScale] = useState<number>(1.0);
 
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -131,6 +138,10 @@ export const ProductManager: React.FC = () => {
     setTempleLength(140);
     setUploadedPhotos([]);
     setUploadedVideo(null);
+    setTryonImageUrl(null);
+    setTryonBridgeX(0.5);
+    setTryonBridgeY(0.45);
+    setTryonScale(1.0);
     setDescription('');
     setIsFeatured(false);
     setIsBestseller(false);
@@ -157,6 +168,12 @@ export const ProductManager: React.FC = () => {
     setDescription(p.description || '');
     setIsFeatured(Boolean(p.is_featured));
     setIsBestseller(Boolean(p.is_bestseller));
+
+    // Try-On State
+    setTryonImageUrl(p.tryon_image_url || null);
+    setTryonBridgeX(p.tryon_bridge_x ?? 0.5);
+    setTryonBridgeY(p.tryon_bridge_y ?? 0.45);
+    setTryonScale(p.tryon_scale ?? 1.0);
 
     // Extract all existing photos
     const photos: string[] = [];
@@ -284,6 +301,10 @@ export const ProductManager: React.FC = () => {
         primary_image: uploadedPhotos[0],
         secondary_image: uploadedPhotos[1] || null,
         video_url: uploadedVideo || null,
+        tryon_image_url: tryonImageUrl || null,
+        tryon_bridge_x: tryonBridgeX,
+        tryon_bridge_y: tryonBridgeY,
+        tryon_scale: tryonScale,
         additional_images: uploadedPhotos.slice(2),
         is_featured: isFeatured,
         is_bestseller: isBestseller,
@@ -454,7 +475,14 @@ export const ProductManager: React.FC = () => {
                       </div>
                       <div>
                         <strong className="text-slate-900 font-medium block">{p.name}</strong>
-                        <span className="font-mono text-[10px] text-[#A4813E] font-semibold">{p.sku}</span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="font-mono text-[10px] text-[#A4813E] font-semibold">{p.sku}</span>
+                          {p.tryon_image_url && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[8px] bg-purple-50 text-purple-700 font-bold border border-purple-200">
+                              🕶️ 3D Try-On
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
 
@@ -841,6 +869,22 @@ export const ProductManager: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              {/* 3D Virtual Try-On Asset Calibration Section */}
+              <TryOnCalibrator
+                tryonImageUrl={tryonImageUrl}
+                bridgeX={tryonBridgeX}
+                bridgeY={tryonBridgeY}
+                scale={tryonScale}
+                candidateImages={uploadedPhotos}
+                onUpdate={({ tryon_image_url, tryon_bridge_x, tryon_bridge_y, tryon_scale }) => {
+                  setTryonImageUrl(tryon_image_url);
+                  setTryonBridgeX(tryon_bridge_x);
+                  setTryonBridgeY(tryon_bridge_y);
+                  setTryonScale(tryon_scale);
+                }}
+                onUploadFile={uploadProductImage}
+              />
 
               {/* Row 1: Name & SKU */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

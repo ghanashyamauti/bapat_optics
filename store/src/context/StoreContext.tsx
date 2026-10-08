@@ -61,6 +61,8 @@ interface StoreContextType {
   setQuickViewProduct: (product: Product | null) => void;
   tryOnProduct: Product | null;
   setTryOnProduct: (product: Product | null) => void;
+  virtualTryOnProduct: Product | null;
+  setVirtualTryOnProduct: (product: Product | null) => void;
   lensProduct: Product | null;
   setLensProduct: (product: Product | null) => void;
   isCartOpen: boolean;
@@ -243,6 +245,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Modals
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
   const [tryOnProduct, setTryOnProduct] = useState<Product | null>(null);
+  const [virtualTryOnProduct, setVirtualTryOnProduct] = useState<Product | null>(null);
   const [lensProduct, setLensProduct] = useState<Product | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -592,6 +595,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setQuickViewProduct,
         tryOnProduct,
         setTryOnProduct,
+        virtualTryOnProduct,
+        setVirtualTryOnProduct,
         lensProduct,
         setLensProduct,
         isCartOpen,

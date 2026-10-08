@@ -9,6 +9,7 @@ export const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
     setQuickViewProduct, 
     setLensProduct, 
     setTryOnProduct, 
+    setVirtualTryOnProduct,
     addToCart, 
     buyNow, 
     shareProduct, 
@@ -32,6 +33,11 @@ export const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const handleOpenTryOn = (e: React.MouseEvent) => {
     e.stopPropagation();
     setTryOnProduct(product);
+  };
+
+  const handleOpenVirtualTryOn = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setVirtualTryOnProduct(product);
   };
 
   const qtyInCart = getCartItemQuantity(product.id, 'FRAME_ONLY');
@@ -268,6 +274,16 @@ export const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
               </button>
             </div>
           )}
+
+          {/* 3D Virtual Try-On Primary Experience Button */}
+          <button
+            type="button"
+            onClick={handleOpenVirtualTryOn}
+            className="w-full eyebrow inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#C6A15B] bg-[#0A0A0A] hover:bg-[#C6A15B] text-[#C6A15B] hover:text-[#0A0A0A] py-2 text-[9px] font-bold transition-all shadow-xs cursor-pointer group"
+          >
+            <Sparkles size={11} className="text-[#C6A15B] group-hover:text-[#0A0A0A] transition-colors" />
+            <span>Live 3D Virtual Try-On</span>
+          </button>
 
           {/* Secondary Row: Try In-Store (WhatsApp) & + Zeiss Lenses */}
           {!isOutOfStock && (

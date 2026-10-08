@@ -119,6 +119,10 @@ class ProductBase(BaseModel):
     primary_image: str
     secondary_image: Optional[str] = None
     video_url: Optional[str] = None
+    tryon_image_url: Optional[str] = None
+    tryon_bridge_x: Optional[float] = 0.5
+    tryon_bridge_y: Optional[float] = 0.45
+    tryon_scale: Optional[float] = 1.0
     is_featured: Optional[bool] = False
     is_bestseller: Optional[bool] = False
     is_active: Optional[bool] = True
@@ -146,6 +150,10 @@ class ProductUpdate(BaseModel):
     primary_image: Optional[str] = None
     secondary_image: Optional[str] = None
     video_url: Optional[str] = None
+    tryon_image_url: Optional[str] = None
+    tryon_bridge_x: Optional[float] = None
+    tryon_bridge_y: Optional[float] = None
+    tryon_scale: Optional[float] = None
     additional_images: Optional[List[str]] = None
     is_featured: Optional[bool] = None
     is_bestseller: Optional[bool] = None

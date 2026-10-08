@@ -85,6 +85,12 @@ class Product(Base):
     secondary_image = Column(String(1000), nullable=True)
     video_url = Column(String(1000), nullable=True)
     
+    # 3D Virtual Try-On Asset & Calibration
+    tryon_image_url = Column(String(1000), nullable=True) # Transparent PNG cutout of frame
+    tryon_bridge_x = Column(Float, default=0.5, nullable=True) # Normalized bridge X anchor (0-1)
+    tryon_bridge_y = Column(Float, default=0.45, nullable=True) # Normalized bridge Y anchor (0-1)
+    tryon_scale = Column(Float, default=1.0, nullable=True) # Calibration scale multiplier
+
     is_featured = Column(Boolean, default=False)
     is_bestseller = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)

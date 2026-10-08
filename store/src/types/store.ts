@@ -48,6 +48,10 @@ export interface Product {
   primary_image: string;
   secondary_image?: string;
   video_url?: string | null;
+  tryon_image_url?: string | null;
+  tryon_bridge_x?: number;
+  tryon_bridge_y?: number;
+  tryon_scale?: number;
   is_featured: boolean;
   is_bestseller: boolean;
   is_active: boolean;

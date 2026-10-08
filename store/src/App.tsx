@@ -20,6 +20,7 @@ import { CartDrawer } from './components/CartDrawer';
 import { CheckoutModal } from './components/CheckoutModal';
 import { CustomerAuthModal } from './components/CustomerAuthModal';
 import { TryOnInquiryModal } from './components/TryOnInquiryModal';
+import { VirtualTryOnModal } from './components/VirtualTryOnModal';
 import { EyeTestBookingModal } from './components/EyeTestBookingModal';
 import { CustomerAccountModal } from './components/CustomerAccountModal';
 import { Footer } from './components/Footer';
@@ -318,6 +319,7 @@ const CatalogContent: React.FC = () => {
       <CheckoutModal />
       <CustomerAuthModal />
       <TryOnInquiryModal />
+      <VirtualTryOnModal />
       <EyeTestBookingModal />
       <CustomerAccountModal
         isOpen={isAccountModalOpen}

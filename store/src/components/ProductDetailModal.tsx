@@ -9,6 +9,7 @@ export const ProductDetailModal: React.FC = () => {
     setQuickViewProduct, 
     setLensProduct, 
     setTryOnProduct, 
+    setVirtualTryOnProduct,
     addToCart, 
     buyNow, 
     shareProduct,
@@ -276,7 +277,20 @@ export const ProductDetailModal: React.FC = () => {
                     <span>Buy Now (Direct Checkout)</span>
                   </button>
 
-                  {/* 3. Customize with Zeiss Lenses */}
+                  {/* 3. Live 3D Virtual Try-On */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuickViewProduct(null);
+                      setVirtualTryOnProduct(product);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 bg-[#0A0A0A] border border-[#C6A15B] hover:bg-[#C6A15B] text-[#C6A15B] hover:text-[#0A0A0A] py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all shadow-md cursor-pointer group"
+                  >
+                    <Sparkles size={14} className="text-[#C6A15B] group-hover:text-[#0A0A0A] transition-colors" />
+                    <span>Live 3D Virtual Try-On (Webcam)</span>
+                  </button>
+
+                  {/* 4. Customize with Zeiss Lenses */}
                   <button
                     type="button"
                     onClick={() => {

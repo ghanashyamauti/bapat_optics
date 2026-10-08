@@ -11,11 +11,14 @@ from app.api import auth, products, filters, inquiries, orders, appointments, cr
 # Create DB tables if they don't exist
 Base.metadata.create_all(bind=engine)
 try:
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS video_url VARCHAR(1000);"))
-        conn.commit()
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_image_url VARCHAR(1000);"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_bridge_x FLOAT DEFAULT 0.5;"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_bridge_y FLOAT DEFAULT 0.45;"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_scale FLOAT DEFAULT 1.0;"))
 except Exception as e:
-    pass
+    print(f"Schema migration note: {e}")
 
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
