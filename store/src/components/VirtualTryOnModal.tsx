@@ -1,15 +1,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
-import { 
-  X, 
-  Camera, 
-  RefreshCw, 
-  Download, 
-  Sparkles, 
-  Sliders, 
-  ShoppingBag, 
-  MessageCircle, 
-  Check, 
+import {
+  X,
+  Camera,
+  RefreshCw,
+  Download,
+  Sparkles,
+  Sliders,
+  ShoppingBag,
+  MessageCircle,
+  Check,
   AlertCircle
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
@@ -31,11 +31,11 @@ const JAW_RIGHT = 397;
 type LensMode = 'CLEAR' | 'BLUEBLOCK' | 'PHOTOFUSION';
 
 export const VirtualTryOnModal: React.FC = () => {
-  const { 
-    virtualTryOnProduct, 
-    setVirtualTryOnProduct, 
-    addToCart, 
-    showToast 
+  const {
+    virtualTryOnProduct,
+    setVirtualTryOnProduct,
+    addToCart,
+    showToast
   } = useStore();
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -46,7 +46,7 @@ export const VirtualTryOnModal: React.FC = () => {
   const [modelProgressText, setModelProgressText] = useState('Initializing Vision AI...');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
-  
+
   // Customization & Controls
   const [userScaleOffset, setUserScaleOffset] = useState(1.0);
   const [userYOffset, setUserYOffset] = useState(0);
@@ -636,7 +636,7 @@ export const VirtualTryOnModal: React.FC = () => {
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/90 p-2 sm:p-4 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-4xl h-[95vh] sm:h-[90vh] bg-[#0A0A0A] border border-[#C6A15B]/40 rounded-2xl overflow-hidden shadow-2xl flex flex-col justify-between">
-        
+
         {/* Top Navigation Bar */}
         <div className="bg-[#0A0A0A]/90 backdrop-blur-md px-4 py-3 border-b border-[#C6A15B]/30 flex items-center justify-between z-20 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -875,33 +875,30 @@ export const VirtualTryOnModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setLensMode('CLEAR')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${
-                    lensMode === 'CLEAR'
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${lensMode === 'CLEAR'
                       ? 'bg-[#C6A15B] text-black shadow-xs'
                       : 'text-white/70 hover:text-white'
-                  }`}
+                    }`}
                 >
                   Clear Vision
                 </button>
                 <button
                   type="button"
                   onClick={() => setLensMode('BLUEBLOCK')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${
-                    lensMode === 'BLUEBLOCK'
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${lensMode === 'BLUEBLOCK'
                       ? 'bg-[#5c7cfa] text-white shadow-xs'
                       : 'text-white/70 hover:text-white'
-                  }`}
+                    }`}
                 >
                   DuraVision Blue
                 </button>
                 <button
                   type="button"
                   onClick={() => setLensMode('PHOTOFUSION')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${
-                    lensMode === 'PHOTOFUSION'
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${lensMode === 'PHOTOFUSION'
                       ? 'bg-slate-700 text-white shadow-xs'
                       : 'text-white/70 hover:text-white'
-                  }`}
+                    }`}
                 >
                   PhotoFusion X
                 </button>
@@ -913,11 +910,10 @@ export const VirtualTryOnModal: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowAdjustPanel((p) => !p)}
-                className={`p-2 rounded-lg border transition-colors cursor-pointer ${
-                  showAdjustPanel
+                className={`p-2 rounded-lg border transition-colors cursor-pointer ${showAdjustPanel
                     ? 'border-[#C6A15B] bg-[#C6A15B]/20 text-[#C6A15B]'
                     : 'border-white/10 bg-white/5 text-white hover:bg-white/15'
-                }`}
+                  }`}
                 title="Fine-tune frame size & position"
               >
                 <Sliders size={14} />

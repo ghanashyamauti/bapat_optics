@@ -1,47 +1,148 @@
-# Environment & Secrets
+# ==============================================================================
+# Environment & Secret Files
+# ==============================================================================
 .env
 .env.*
 *.env
+.dev.vars
+
+# Allow configuration templates to remain tracked
+!.env.example
+!.env*.example
+!.env.template
+!.env*.template
+
+# Module specific env paths
 backend/.env
 landing/.env
 bapat-optics-landing/.env
 store/.env
 admin/.env
 
-# Databases & local state
+# ==============================================================================
+# Databases & Local State
+# ==============================================================================
 *.db
 *.sqlite
 *.sqlite3
 backend/*.db
+bapat_local.db
 test.db
 
-# Python
+# ==============================================================================
+# Python & Virtual Environments
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
+.Python
 .venv/
 venv/
 env/
-.pytest_cache/
+ENV/
+env.bak/
+venv.bak/
 
-# Node & Build artifacts
-node_modules/
-**/node_modules/
+# Python packaging & build artifacts
+build/
+**/build/
+develop-eggs/
 dist/
 **/dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+**/*.egg-info/
+.installed.cfg
+*.egg
+
+# Python test & lint caches
+.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ==============================================================================
+# Node, Bundlers & Frontend Build Artifacts
+# ==============================================================================
+node_modules/
+**/node_modules/
+dist-ssr/
+**/dist-ssr/
 .output/
 **/.output/
 .nitro/
 **/.nitro/
+.vinxi/
+**/.vinxi/
+.tanstack/
+**/.tanstack/
 .wrangler/
 **/.wrangler/
+.workspace/
+**/.workspace/
+.vite/
+**/.vite/
+.cache/
+**/.cache/
+*.tsbuildinfo
+**/*.tsbuildinfo
+coverage/
+**/coverage/
+.nyc_output/
 
-# Uploads & Media cache
+# Local overrides
+*.local
+**/*.local
+
+# ==============================================================================
+# Logs & Process Artifacts
+# ==============================================================================
+*.log
+**/*.log
+logs/
+**/logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ==============================================================================
+# Runtime Uploads & Media Cache
+# ==============================================================================
 backend/app/uploads/*
 !backend/app/uploads/.gitkeep
 
-# System & IDE files
+# ==============================================================================
+# OS & Editor Files
+# ==============================================================================
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+#*#

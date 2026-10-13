@@ -7,28 +7,48 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build artifacts & frameworks
 dist
 dist-ssr
 .output
 .vinxi
 .tanstack/**
 .nitro
-*.local
-.env
-.env*.local
+*.tsbuildinfo
+.vite
+.cache
 
+# Environment variables & secrets
+.env
+.env.*
+*.env
+*.local
 .workspace/
 .wrangler/
 .dev.vars
+!.env.example
+!.env*.example
+!.env.template
+!.env*.template
+
+# Test coverage
+coverage
+.nyc_output
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*~

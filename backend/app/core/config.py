@@ -41,15 +41,19 @@ class Settings(BaseSettings):
     SHIPPING_FLAT_RATE: float = float(os.getenv("SHIPPING_FLAT_RATE", "99"))
     RETURN_WINDOW_DAYS: int = int(os.getenv("RETURN_WINDOW_DAYS", "7"))
     
-    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175")
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175,http://localhost:5176,http://127.0.0.1:5176")
     """Comma-separated origins; converted to a list after settings load."""
     CORS_ORIGINS_DEFAULT: List[str] = [
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:5176",
         "http://localhost:3000",
         "http://localhost:8000",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
+        "http://127.0.0.1:5176",
         "http://127.0.0.1:3000",
     ]
 
