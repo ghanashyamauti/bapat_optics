@@ -275,15 +275,17 @@ export const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
             </div>
           )}
 
-          {/* 3D Virtual Try-On Primary Experience Button */}
-          <button
-            type="button"
-            onClick={handleOpenVirtualTryOn}
-            className="w-full eyebrow inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#C6A15B] bg-[#0A0A0A] hover:bg-[#C6A15B] text-[#C6A15B] hover:text-[#0A0A0A] py-2 text-[9px] font-bold transition-all shadow-xs cursor-pointer group"
-          >
-            <Sparkles size={11} className="text-[#C6A15B] group-hover:text-[#0A0A0A] transition-colors" />
-            <span>Live 3D Virtual Try-On</span>
-          </button>
+          {/* 3D Virtual Try-On Primary Experience Button (For wearable frames, sunglasses, and meta glasses) */}
+          {(product.category?.slug === 'spectacle-frames' || product.category?.slug === 'sunglasses' || product.category?.slug === 'meta' || product.category?.slug === 'kids') && !!product.tryon_image_url && (
+            <button
+              type="button"
+              onClick={handleOpenVirtualTryOn}
+              className="w-full eyebrow inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#C6A15B] bg-[#0A0A0A] hover:bg-[#C6A15B] text-[#C6A15B] hover:text-[#0A0A0A] py-2 text-[9px] font-bold transition-all shadow-xs cursor-pointer group"
+            >
+              <Sparkles size={11} className="text-[#C6A15B] group-hover:text-[#0A0A0A] transition-colors" />
+              <span>Live 3D Virtual Try-On</span>
+            </button>
+          )}
 
           {/* Secondary Row: Try In-Store (WhatsApp) & + Zeiss Lenses */}
           {!isOutOfStock && (
