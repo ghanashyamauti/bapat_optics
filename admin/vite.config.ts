@@ -16,6 +16,12 @@ export default defineConfig({
   },
   server: {
     port: 5174,
-    host: true
+    host: true,
+    proxy: {
+      '/uploads': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
   }
 })

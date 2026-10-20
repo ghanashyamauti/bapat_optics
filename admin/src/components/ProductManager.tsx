@@ -76,11 +76,17 @@ export const ProductManager: React.FC = () => {
   const [uploadedPhotos, setUploadedPhotos] = useState<string[]>([]);
   const [uploadedVideo, setUploadedVideo] = useState<string | null>(null);
 
-  // 3D Virtual Try-On Asset & Calibration States
+  // 3D Virtual Try-On Asset & Calibration States (Front & Side)
   const [tryonImageUrl, setTryonImageUrl] = useState<string | null>(null);
   const [tryonBridgeX, setTryonBridgeX] = useState<number>(0.5);
   const [tryonBridgeY, setTryonBridgeY] = useState<number>(0.45);
   const [tryonScale, setTryonScale] = useState<number>(1.0);
+
+  const [tryonSideImageUrl, setTryonSideImageUrl] = useState<string | null>(null);
+  const [tryonSideAnchorX, setTryonSideAnchorX] = useState<number>(0.15);
+  const [tryonSideAnchorY, setTryonSideAnchorY] = useState<number>(0.50);
+  const [tryonSideScale, setTryonSideScale] = useState<number>(1.0);
+  const [tryonAssetType, setTryonAssetType] = useState<string>('2d');
 
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -142,6 +148,11 @@ export const ProductManager: React.FC = () => {
     setTryonBridgeX(0.5);
     setTryonBridgeY(0.45);
     setTryonScale(1.0);
+    setTryonSideImageUrl(null);
+    setTryonSideAnchorX(0.15);
+    setTryonSideAnchorY(0.50);
+    setTryonSideScale(1.0);
+    setTryonAssetType('2d');
     setDescription('');
     setIsFeatured(false);
     setIsBestseller(false);
@@ -169,11 +180,16 @@ export const ProductManager: React.FC = () => {
     setIsFeatured(Boolean(p.is_featured));
     setIsBestseller(Boolean(p.is_bestseller));
 
-    // Try-On State
+    // Try-On State (Front & Side)
     setTryonImageUrl(p.tryon_image_url || null);
     setTryonBridgeX(p.tryon_bridge_x ?? 0.5);
     setTryonBridgeY(p.tryon_bridge_y ?? 0.45);
     setTryonScale(p.tryon_scale ?? 1.0);
+    setTryonSideImageUrl(p.tryon_side_image_url || null);
+    setTryonSideAnchorX(p.tryon_side_anchor_x ?? 0.15);
+    setTryonSideAnchorY(p.tryon_side_anchor_y ?? 0.50);
+    setTryonSideScale(p.tryon_side_scale ?? 1.0);
+    setTryonAssetType(p.tryon_asset_type || (p.tryon_image_url?.toLowerCase().endsWith('.glb') || p.tryon_image_url?.toLowerCase().endsWith('.gltf') ? '3d' : '2d'));
 
     // Extract all existing photos
     const photos: string[] = [];
@@ -305,6 +321,11 @@ export const ProductManager: React.FC = () => {
         tryon_bridge_x: tryonBridgeX,
         tryon_bridge_y: tryonBridgeY,
         tryon_scale: tryonScale,
+        tryon_side_image_url: tryonSideImageUrl || null,
+        tryon_side_anchor_x: tryonSideAnchorX,
+        tryon_side_anchor_y: tryonSideAnchorY,
+        tryon_side_scale: tryonSideScale,
+        tryon_asset_type: tryonAssetType || (tryonImageUrl?.toLowerCase().endsWith('.glb') || tryonImageUrl?.toLowerCase().endsWith('.gltf') ? '3d' : '2d'),
         additional_images: uploadedPhotos.slice(2),
         is_featured: isFeatured,
         is_bestseller: isBestseller,
@@ -479,7 +500,7 @@ export const ProductManager: React.FC = () => {
                           <span className="font-mono text-[10px] text-[#A4813E] font-semibold">{p.sku}</span>
                           {p.tryon_image_url && (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[8px] bg-purple-50 text-purple-700 font-bold border border-purple-200">
-                              🕶️ 3D Try-On
+                              🕶️ Front{p.tryon_side_image_url ? ' + Side' : ''}
                             </span>
                           )}
                         </div>
@@ -870,18 +891,38 @@ export const ProductManager: React.FC = () => {
                 </div>
               </div>
 
-              {/* 3D Virtual Try-On Asset Calibration Section */}
+              {/* 3D Virtual Try-On Asset Calibration Section (Front & Side) */}
               <TryOnCalibrator
                 tryonImageUrl={tryonImageUrl}
                 bridgeX={tryonBridgeX}
                 bridgeY={tryonBridgeY}
                 scale={tryonScale}
+                tryonAssetType={tryonAssetType}
+                tryonSideImageUrl={tryonSideImageUrl}
+                sideAnchorX={tryonSideAnchorX}
+                sideAnchorY={tryonSideAnchorY}
+                sideScale={tryonSideScale}
                 candidateImages={uploadedPhotos}
-                onUpdate={({ tryon_image_url, tryon_bridge_x, tryon_bridge_y, tryon_scale }) => {
+                onUpdate={({ 
+                  tryon_image_url, 
+                  tryon_bridge_x, 
+                  tryon_bridge_y, 
+                  tryon_scale,
+                  tryon_side_image_url,
+                  tryon_side_anchor_x,
+                  tryon_side_anchor_y,
+                  tryon_side_scale,
+                  tryon_asset_type
+                }) => {
                   setTryonImageUrl(tryon_image_url);
                   setTryonBridgeX(tryon_bridge_x);
                   setTryonBridgeY(tryon_bridge_y);
                   setTryonScale(tryon_scale);
+                  setTryonSideImageUrl(tryon_side_image_url || null);
+                  if (tryon_side_anchor_x !== undefined) setTryonSideAnchorX(tryon_side_anchor_x);
+                  if (tryon_side_anchor_y !== undefined) setTryonSideAnchorY(tryon_side_anchor_y);
+                  if (tryon_side_scale !== undefined) setTryonSideScale(tryon_side_scale);
+                  if (tryon_asset_type !== undefined) setTryonAssetType(tryon_asset_type || '2d');
                 }}
                 onUploadFile={uploadProductImage}
               />

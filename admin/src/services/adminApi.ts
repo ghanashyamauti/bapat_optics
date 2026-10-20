@@ -77,9 +77,20 @@ export const fetchMasterFilters = async () => {
 };
 
 export const uploadProductImage = async (file: File): Promise<string> => {
+  const isModel = file.name.toLowerCase().endsWith('.glb') || file.name.toLowerCase().endsWith('.gltf');
+  const endpoint = isModel ? '/uploads/model' : '/uploads/image';
   const form = new FormData();
   form.append('file', file);
-  const response = await adminApi.post<{ url: string }>('/uploads/image', form, {
+  const response = await adminApi.post<{ url: string }>(endpoint, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data.url.startsWith('http') ? response.data.url : `${adminApi.defaults.baseURL?.replace(/\/api\/v1$/, '')}${response.data.url}`;
+};
+
+export const uploadProductModel = async (file: File): Promise<string> => {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await adminApi.post<{ url: string }>('/uploads/model', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data.url.startsWith('http') ? response.data.url : `${adminApi.defaults.baseURL?.replace(/\/api\/v1$/, '')}${response.data.url}`;
