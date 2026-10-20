@@ -52,6 +52,11 @@ export interface Product {
   tryon_bridge_x?: number;
   tryon_bridge_y?: number;
   tryon_scale?: number;
+  tryon_side_image_url?: string | null;
+  tryon_side_anchor_x?: number;
+  tryon_side_anchor_y?: number;
+  tryon_side_scale?: number;
+  tryon_asset_type?: '2d' | '3d' | string | null;
   is_featured: boolean;
   is_bestseller: boolean;
   is_active: boolean;

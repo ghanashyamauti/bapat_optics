@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import {
   X,
@@ -157,35 +159,37 @@ function processEyewearImage(img: HTMLImageElement): { canvas: CanvasImageSource
 // Normalize try-on image URL for dev proxy, absolute backend, or relative paths
 function normalizeTryonUrl(url?: string | null): string | null {
   if (!url) return null;
-  // If URL contains '/uploads/', use relative path so Vite proxy and static serving work uniformly
-  const uploadIdx = url.indexOf('/uploads/');
-  if (uploadIdx !== -1) {
-    return url.substring(uploadIdx);
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  // If local backend absolute URL, strip host so Vite proxy handles it smoothly without CORS
+  if (trimmed.startsWith('http://127.0.0.1:8000/uploads/') || trimmed.startsWith('http://localhost:8000/uploads/')) {
+    return trimmed.replace(/^https?:\/\/(127\.0\.0\.1|localhost):8000/, '');
   }
-  return url;
+
+  // If already relative /uploads/, return as-is
+  if (trimmed.startsWith('/uploads/')) {
+    return trimmed;
+  }
+
+  // If external absolute URL (e.g. S3, Cloudinary, CDN), return as-is
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+
+  // If bare filename, prefix /uploads/
+  if (!trimmed.startsWith('/')) {
+    return `/uploads/${trimmed}`;
+  }
+
+  return trimmed;
 }
 
-// Determine matching temple arm asset based on product color & material
-function getTempleArmAsset(product: Product): string {
-  const c = (product.colour || '').toUpperCase();
-  const m = (product.material || '').toUpperCase();
-
-  if (c.includes('GOLD') || c.includes('ROSE')) {
-    return '/uploads/temple_arm_gold.png';
-  }
-  if (c.includes('SILVER') || c.includes('TITANIUM') || c.includes('GUNMETAL') || m.includes('TITANIUM')) {
-    return '/uploads/temple_arm_silver.png';
-  }
-  if (c.includes('BLUE') || c.includes('NAVY')) {
-    return '/uploads/temple_arm_blue.png';
-  }
-  if (c.includes('TORTOISE') || c.includes('HAVANA') || c.includes('CARAMEL') || c.includes('BROWN')) {
-    return '/uploads/temple_arm_tortoise.png';
-  }
-  if (c.includes('CLEAR') || c.includes('CRYSTAL') || c.includes('TRANSPARENT')) {
-    return '/uploads/temple_arm_clear.png';
-  }
-  return '/uploads/temple_arm_black.png';
+// Check whether an asset URL points to a 3D model (GLB or GLTF)
+function is3DModelAsset(url?: string | null): boolean {
+  if (!url) return false;
+  const clean = url.split('?')[0].toLowerCase();
+  return clean.endsWith('.glb') || clean.endsWith('.gltf');
 }
 
 interface TryOnContentProps {
@@ -202,11 +206,21 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   } = useStore();
 
   const activeProduct = virtualTryOnProduct || initialProduct;
+  const is3D = is3DModelAsset(activeProduct.tryon_image_url) || activeProduct.tryon_asset_type === '3d';
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const threeCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Three.js 3D Eyewear Model Refs
+  const threeRendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const threeSceneRef = useRef<THREE.Scene | null>(null);
+  const threeCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const threeModelGroupRef = useRef<THREE.Group | null>(null);
+  const modelBoundingWidthRef = useRef<number>(1.0);
+  const loadedModelUrlRef = useRef<string | null>(null);
 
   // Camera & Model State
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -215,12 +229,17 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   const [isLoadingModel, setIsLoadingModel] = useState(true);
   const [modelProgressText, setModelProgressText] = useState('Initializing Vision AI...');
 
-  // Active Eyewear Try-On Asset State
+  // Active Eyewear Try-On Asset State (Front View / 3D Model)
   const [isAssetLoading, setIsAssetLoading] = useState(false);
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
   const frameImageRef = useRef<CanvasImageSource | null>(null);
   const frameAspectRef = useRef<number>(2.5);
-  const templeArmImgRef = useRef<HTMLImageElement | null>(null);
+
+  // Active Eyewear Try-On Asset State (Side View for 2D PNG)
+  const [isSideAssetLoading, setIsSideAssetLoading] = useState(false);
+  const [hasSideAsset, setHasSideAsset] = useState(false);
+  const sideImageRef = useRef<CanvasImageSource | null>(null);
+  const sideAspectRef = useRef<number>(2.5);
 
   // Customization & User Fit Calibration
   const [userScaleOffset, setUserScaleOffset] = useState(1.0);
@@ -250,6 +269,15 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
     angle: 0,
     yaw: 0,
     pitch: 0,
+    leftHingeX: 0,
+    leftHingeY: 0,
+    leftEarX: 0,
+    leftEarY: 0,
+    rightHingeX: 0,
+    rightHingeY: 0,
+    rightEarX: 0,
+    rightEarY: 0,
+    sideBlend: 0,
     active: false,
     framesSinceDetection: 0
   });
@@ -273,24 +301,163 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   };
 
   // ============================================================================
-  // 1. Load Product-Specific Try-On PNG Cutout (Admin Managed - No Hardcoded Fallback!)
+  // 1. Three.js 3D WebGL Renderer Lifecycle Setup
+  // ============================================================================
+  useEffect(() => {
+    const canvas = threeCanvasRef.current;
+    if (!canvas) return;
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      alpha: true,
+      antialias: true,
+      preserveDrawingBuffer: true,
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+
+    const scene = new THREE.Scene();
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.8);
+    scene.add(ambientLight);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+    keyLight.position.set(0, 300, 400);
+    scene.add(keyLight);
+
+    const fillLeft = new THREE.DirectionalLight(0xe0e7ff, 1.2);
+    fillLeft.position.set(-300, 100, 250);
+    scene.add(fillLeft);
+
+    const fillRight = new THREE.DirectionalLight(0xffedd5, 1.2);
+    fillRight.position.set(300, 100, 250);
+    scene.add(fillRight);
+
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    rimLight.position.set(0, -200, 200);
+    scene.add(rimLight);
+
+    const modelGroup = new THREE.Group();
+    scene.add(modelGroup);
+
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
+
+    threeRendererRef.current = renderer;
+    threeSceneRef.current = scene;
+    threeCameraRef.current = camera;
+    threeModelGroupRef.current = modelGroup;
+
+    return () => {
+      renderer.dispose();
+      threeRendererRef.current = null;
+      threeSceneRef.current = null;
+      threeCameraRef.current = null;
+      threeModelGroupRef.current = null;
+    };
+  }, []);
+
+  // ============================================================================
+  // 2. Load Product-Specific Try-On Cutouts (2D PNG) or 3D Glasses Models (GLB)
   // ============================================================================
   useEffect(() => {
     let isCancelled = false;
-    const rawUrl = activeProduct.tryon_image_url;
-    const normalizedUrl = normalizeTryonUrl(rawUrl);
 
-    // If product has no try-on asset configured in the Admin Portal, DO NOT show fallback glasses
-    if (!normalizedUrl) {
+    const rawFrontUrl = activeProduct.tryon_image_url;
+    const normalizedFrontUrl = normalizeTryonUrl(rawFrontUrl);
+    const productIs3D = is3DModelAsset(rawFrontUrl) || activeProduct.tryon_asset_type === '3d';
+
+    if (!normalizedFrontUrl) {
       frameImageRef.current = null;
-      setAssetLoadError('No Virtual Try-On cutout configured for this product in Admin Portal.');
+      sideImageRef.current = null;
+      if (threeModelGroupRef.current) threeModelGroupRef.current.clear();
+      loadedModelUrlRef.current = null;
+      setHasSideAsset(false);
+      setAssetLoadError('No Virtual Try-On asset configured for this product in Admin Portal.');
       setIsAssetLoading(false);
       return;
     }
 
-    // Check memory cache first
-    if (processedImageCache.has(normalizedUrl)) {
-      const cached = processedImageCache.get(normalizedUrl)!;
+    // --- CASE A: 3D Glasses Model (.glb / .gltf) ---
+    if (productIs3D) {
+      frameImageRef.current = null;
+      sideImageRef.current = null;
+      setHasSideAsset(true); // 3D models provide front and side geometry naturally
+
+      if (loadedModelUrlRef.current === normalizedFrontUrl && threeModelGroupRef.current?.children.length) {
+        setAssetLoadError(null);
+        setIsAssetLoading(false);
+      } else {
+        setIsAssetLoading(true);
+        setAssetLoadError(null);
+        if (threeModelGroupRef.current) threeModelGroupRef.current.clear();
+
+        const loader = new GLTFLoader();
+        loader.load(
+          normalizedFrontUrl,
+          (gltf) => {
+            if (isCancelled) return;
+            const model = gltf.scene;
+
+            // Center geometry around nasal bridge origin
+            const box = new THREE.Box3().setFromObject(model);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+
+            model.position.x = -center.x;
+            model.position.y = -center.y;
+            model.position.z = -center.z;
+
+            const pivot = new THREE.Group();
+            pivot.add(model);
+
+            modelBoundingWidthRef.current = Math.max(0.001, size.x);
+
+            // Enhance materials for luxury eyewear realism
+            model.traverse((child: any) => {
+              if (child.isMesh && child.material) {
+                child.castShadow = false;
+                child.receiveShadow = false;
+                if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
+                  child.material.envMapIntensity = 1.3;
+                  child.material.needsUpdate = true;
+                }
+              }
+            });
+
+            if (threeModelGroupRef.current) {
+              threeModelGroupRef.current.clear();
+              threeModelGroupRef.current.add(pivot);
+            }
+            loadedModelUrlRef.current = normalizedFrontUrl;
+            setAssetLoadError(null);
+            setIsAssetLoading(false);
+          },
+          undefined,
+          (err) => {
+            if (isCancelled) return;
+            console.warn('GLTFLoader error:', err);
+            if (threeModelGroupRef.current) threeModelGroupRef.current.clear();
+            loadedModelUrlRef.current = null;
+            setAssetLoadError(`Failed to load 3D glasses model (${normalizedFrontUrl}). Please verify file in Admin Portal.`);
+            setIsAssetLoading(false);
+          }
+        );
+      }
+
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    // --- CASE B: 2D Front & Side View PNG Cutouts ---
+    if (threeModelGroupRef.current) threeModelGroupRef.current.clear();
+    loadedModelUrlRef.current = null;
+
+    // --- Front View PNG ---
+    if (processedImageCache.has(normalizedFrontUrl)) {
+      const cached = processedImageCache.get(normalizedFrontUrl)!;
       frameImageRef.current = cached.canvas;
       frameAspectRef.current = cached.aspect;
       setAssetLoadError(null);
@@ -302,12 +469,12 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.src = normalizedUrl;
+      img.src = normalizedFrontUrl;
 
       img.onload = () => {
         if (isCancelled) return;
         const processed = processEyewearImage(img);
-        processedImageCache.set(normalizedUrl, processed);
+        processedImageCache.set(normalizedFrontUrl, processed);
         frameImageRef.current = processed.canvas;
         frameAspectRef.current = processed.aspect;
         setAssetLoadError(null);
@@ -316,31 +483,57 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
       img.onerror = () => {
         if (isCancelled) return;
-        // Strict adherence to instructions: NO default or fallback hardcoded glasses image!
         frameImageRef.current = null;
-        setAssetLoadError(`Failed to load try-on asset (${normalizedUrl}). Please verify file in Admin Portal.`);
+        setAssetLoadError(`Failed to load front try-on asset (${normalizedFrontUrl}). Please verify file in Admin Portal.`);
         setIsAssetLoading(false);
       };
     }
 
-    // Load matching temple arm texture for realistic 3D perspective during head turns
-    const armUrl = getTempleArmAsset(activeProduct);
-    const armImg = new Image();
-    armImg.crossOrigin = 'anonymous';
-    armImg.src = armUrl;
-    armImg.onload = () => {
-      if (!isCancelled) {
-        templeArmImgRef.current = armImg;
-      }
-    };
-    armImg.onerror = () => {
-      templeArmImgRef.current = null;
-    };
+    // --- Side View PNG (Dual-View Support) ---
+    const rawSideUrl = activeProduct.tryon_side_image_url;
+    const normalizedSideUrl = normalizeTryonUrl(rawSideUrl);
+
+    if (!normalizedSideUrl) {
+      sideImageRef.current = null;
+      setHasSideAsset(false);
+      setIsSideAssetLoading(false);
+    } else if (processedImageCache.has(normalizedSideUrl)) {
+      const cached = processedImageCache.get(normalizedSideUrl)!;
+      sideImageRef.current = cached.canvas;
+      sideAspectRef.current = cached.aspect;
+      setHasSideAsset(true);
+      setIsSideAssetLoading(false);
+    } else {
+      setIsSideAssetLoading(true);
+      setHasSideAsset(true);
+      sideImageRef.current = null;
+
+      const sideImg = new Image();
+      sideImg.crossOrigin = 'anonymous';
+      sideImg.src = normalizedSideUrl;
+
+      sideImg.onload = () => {
+        if (isCancelled) return;
+        const processed = processEyewearImage(sideImg);
+        processedImageCache.set(normalizedSideUrl, processed);
+        sideImageRef.current = processed.canvas;
+        sideAspectRef.current = processed.aspect;
+        setIsSideAssetLoading(false);
+      };
+
+      sideImg.onerror = () => {
+        if (isCancelled) return;
+        console.warn(`Failed to load side try-on asset (${normalizedSideUrl}). Front view will be used.`);
+        sideImageRef.current = null;
+        setHasSideAsset(false);
+        setIsSideAssetLoading(false);
+      };
+    }
 
     return () => {
       isCancelled = true;
     };
-  }, [activeProduct]);
+  }, [activeProduct, is3D]);
 
   // ============================================================================
   // 2. Camera Stream Lifecycle Management with Adaptive Fallbacks
@@ -606,11 +799,10 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                     (lEye.y - rEye.y) * vidH
                   );
 
-                  // Admin calibrated scale & bridge anchor
-                  const adminScale = activeProduct.tryon_scale ?? 1.0;
-                  const targetWidth = eyeSpan * 2.25 * adminScale * userScaleOffset;
-                  const aspect = frameAspectRef.current || 2.5;
-                  const targetHeight = targetWidth / aspect;
+                  // Head horizontal yaw estimation (ratio between left/right eye distance to bridge)
+                  const distR = Math.hypot((bridge.x - rEye.x) * vidW, (bridge.y - rEye.y) * vidH);
+                  const distL = Math.hypot((lEye.x - bridge.x) * vidW, (lEye.y - bridge.y) * vidH);
+                  const targetYaw = (distR - distL) / ((distR + distL) || 1);
 
                   // Head roll angle
                   const targetAngle = Math.atan2(
@@ -618,14 +810,39 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                     (lEye.x - rEye.x) * vidW
                   );
 
-                  // Head horizontal yaw estimation (ratio between left/right eye distance to bridge)
-                  const distR = Math.hypot((bridge.x - rEye.x) * vidW, (bridge.y - rEye.y) * vidH);
-                  const distL = Math.hypot((lEye.x - bridge.x) * vidW, (lEye.y - bridge.y) * vidH);
-                  const targetYaw = (distR - distL) / ((distR + distL) || 1);
+                  // Head pitch angle estimation
+                  const forehead = landmarks[FOREHEAD_TOP];
+                  const chin = landmarks[CHIN_BOTTOM];
+                  let targetPitch = 0;
+                  if (forehead && chin && bridge) {
+                    const midY = (forehead.y + chin.y) / 2;
+                    const rawPitch = (bridge.y - midY) * 2.2;
+                    const depthPitch = (chin.z !== undefined && forehead.z !== undefined) ? (chin.z - forehead.z) * 1.6 : 0;
+                    targetPitch = rawPitch + depthPitch;
+                  }
 
-                  // Adaptive One-Euro style velocity responsive smoothing
+                  // Admin calibrated scale & bridge anchor with yaw correction to prevent frame shrinkage
+                  const adminScale = activeProduct.tryon_scale ?? 1.0;
+                  const yawCorrection = Math.max(0.55, Math.cos(targetYaw * 1.35));
+                  const trueEyeSpan = eyeSpan / yawCorrection;
+                  const targetWidth = trueEyeSpan * 2.25 * adminScale * userScaleOffset;
+                  const aspect = frameAspectRef.current || 2.5;
+                  const targetHeight = targetWidth / aspect;
+
+                  // Side view cranial anchors
+                  const targetLHingeX = lEye.x * vidW;
+                  const targetLHingeY = lEye.y * vidH + userYOffset;
+                  const targetLEarX = (lTemple ? lTemple.x : (lEye.x + 0.15)) * vidW;
+                  const targetLEarY = (lTemple ? lTemple.y : lEye.y) * vidH + userYOffset;
+
+                  const targetRHingeX = rEye.x * vidW;
+                  const targetRHingeY = rEye.y * vidH + userYOffset;
+                  const targetREarX = (rTemple ? rTemple.x : (rEye.x - 0.15)) * vidW;
+                  const targetREarY = (rTemple ? rTemple.y : rEye.y) * vidH + userYOffset;
+
+                  // Adaptive velocity-responsive smoothing
                   const smooth = smoothPoseRef.current;
-                  const alpha = smooth.active ? 0.40 : 1.0;
+                  const alpha = smooth.active ? 0.38 : 1.0;
 
                   smooth.x += (targetX - smooth.x) * alpha;
                   smooth.y += (targetY - smooth.y) * alpha;
@@ -633,6 +850,18 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                   smooth.height += (targetHeight - smooth.height) * alpha;
                   smooth.angle += (targetAngle - smooth.angle) * alpha;
                   smooth.yaw += (targetYaw - smooth.yaw) * alpha;
+                  smooth.pitch += (targetPitch - smooth.pitch) * alpha;
+
+                  smooth.leftHingeX += (targetLHingeX - smooth.leftHingeX) * alpha;
+                  smooth.leftHingeY += (targetLHingeY - smooth.leftHingeY) * alpha;
+                  smooth.leftEarX += (targetLEarX - smooth.leftEarX) * alpha;
+                  smooth.leftEarY += (targetLEarY - smooth.leftEarY) * alpha;
+
+                  smooth.rightHingeX += (targetRHingeX - smooth.rightHingeX) * alpha;
+                  smooth.rightHingeY += (targetRHingeY - smooth.rightHingeY) * alpha;
+                  smooth.rightEarX += (targetREarX - smooth.rightEarX) * alpha;
+                  smooth.rightEarY += (targetREarY - smooth.rightEarY) * alpha;
+
                   smooth.active = true;
                   smooth.framesSinceDetection = 0;
                 }
@@ -652,133 +881,260 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             }
           }
 
+          // Synchronize Three.js Renderer Resolution & Camera Matrix
+          const threeCanvas = threeCanvasRef.current;
+          const renderer = threeRendererRef.current;
+          const camera = threeCameraRef.current;
+          const scene = threeSceneRef.current;
+          const modelGroup = threeModelGroupRef.current;
+
+          if (threeCanvas && renderer && camera) {
+            if (threeCanvas.width !== vidW || threeCanvas.height !== vidH) {
+              threeCanvas.width = vidW;
+              threeCanvas.height = vidH;
+              renderer.setSize(vidW, vidH, false);
+              const fovRad = (camera.fov * Math.PI) / 180;
+              const cameraZ = (vidH / 2) / Math.tan(fovRad / 2);
+              camera.aspect = vidW / vidH;
+              camera.position.set(0, 0, cameraZ);
+              camera.lookAt(0, 0, 0);
+              camera.updateProjectionMatrix();
+            }
+          }
+
           // ====================================================================
-          // Render Glasses: ONLY if smooth pose is active AND image is loaded
+          // A. 3D Glasses Model Rendering Loop (Three.js WebGL)
           // ====================================================================
-          if (smooth.active && frameImageRef.current) {
-            const frameImg = frameImageRef.current;
-            const adminAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
-            const adminAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
+          if (is3D) {
+            if (smooth.active && modelGroup && modelGroup.children.length > 0 && renderer && scene && camera) {
+              const pivot = modelGroup.children[0] as THREE.Group;
+              const adminScale = activeProduct.tryon_scale ?? 1.0;
+              const adminAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
+              const adminAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
 
-            // 1. Draw 3D Temple Arm (Side Arm) when head rotates left or right
-            const armImg = templeArmImgRef.current;
-            const yaw = smooth.yaw;
+              // Scale glasses model to match face width
+              const desiredWidth = smooth.width * 1.05;
+              const baseScale = desiredWidth / (modelBoundingWidthRef.current || 1.0);
+              pivot.scale.set(baseScale, baseScale, baseScale);
 
-            if (armImg && Math.abs(yaw) > 0.06) {
-              ctx.save();
-              // When head turns to user's left (facing viewer's right, yaw < -0.06)
-              if (yaw < -0.06) {
-                // Left temple arm extending back to left ear
-                ctx.translate(smooth.x, smooth.y);
-                ctx.rotate(smooth.angle);
-                const hingeX = (1 - adminAnchorX) * smooth.width * 0.96;
-                const hingeY = -adminAnchorY * smooth.height * 0.2;
-                const armLength = smooth.width * 0.48 * Math.min(1.2, Math.abs(yaw) * 2.8);
-                const armH = smooth.height * 0.22;
+              // Position at nose bridge (screen center = Three.js origin)
+              const posX = (smooth.x - vidW / 2) + (0.5 - adminAnchorX) * smooth.width;
+              const posY = -(smooth.y - vidH / 2) + (adminAnchorY - 0.45) * smooth.height;
+              pivot.position.set(posX, posY, 0);
 
-                ctx.save();
-                ctx.translate(hingeX, hingeY);
-                // Rotate arm back towards ear angle
-                ctx.rotate(0.12 - yaw * 0.25);
-                ctx.drawImage(armImg, 0, -armH * 0.5, armLength, armH);
-                ctx.restore();
-              } else if (yaw > 0.06) {
-                // Right temple arm extending back to right ear
-                ctx.translate(smooth.x, smooth.y);
-                ctx.rotate(smooth.angle);
-                const hingeX = -adminAnchorX * smooth.width * 0.96;
-                const hingeY = -adminAnchorY * smooth.height * 0.2;
-                const armLength = smooth.width * 0.48 * Math.min(1.2, Math.abs(yaw) * 2.8);
-                const armH = smooth.height * 0.22;
+              // 3D rotations for roll, yaw, pitch
+              pivot.rotation.z = -smooth.angle;
+              pivot.rotation.y = smooth.yaw * 1.45;
+              pivot.rotation.x = smooth.pitch * 0.95;
 
-                ctx.save();
-                ctx.translate(hingeX, hingeY);
-                ctx.scale(-1, 1); // Flip arm horizontally for right temple
-                ctx.rotate(0.12 + yaw * 0.25);
-                ctx.drawImage(armImg, 0, -armH * 0.5, armLength, armH);
-                ctx.restore();
+              // Lens tint coating effects
+              pivot.traverse((child: any) => {
+                if (child.isMesh && child.material) {
+                  const mName = (child.name || '').toLowerCase();
+                  if (mName.includes('lens') || mName.includes('glass')) {
+                    if (lensMode === 'BLUEBLOCK') {
+                      child.material.color = new THREE.Color(0x99bbff);
+                      child.material.opacity = 0.85;
+                      child.material.transparent = true;
+                    } else if (lensMode === 'PHOTOFUSION') {
+                      child.material.color = new THREE.Color(0x222233);
+                      child.material.opacity = 0.9;
+                      child.material.transparent = true;
+                    } else {
+                      child.material.color = new THREE.Color(0xffffff);
+                      child.material.opacity = 0.65;
+                      child.material.transparent = true;
+                    }
+                  }
+                }
+              });
+
+              pivot.visible = true;
+              renderer.render(scene, camera);
+            } else if (renderer && scene && camera) {
+              if (modelGroup && modelGroup.children[0]) {
+                (modelGroup.children[0] as THREE.Group).visible = false;
               }
+              renderer.clear();
+            }
+          } else {
+            // Clear Three.js WebGL canvas when rendering 2D PNG
+            if (renderer && scene && camera) {
+              renderer.clear();
+            }
+
+            // ====================================================================
+            // B. 2D Eyewear Frame Rendering Loop (Dual-View Canvas)
+            // ====================================================================
+            if (smooth.active && frameImageRef.current) {
+              const frameImg = frameImageRef.current;
+              const sideImg = sideImageRef.current;
+              const adminAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
+              const adminAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
+
+              // Perspective foreshortening factor for the front frame as head turns
+              const yawCos = Math.max(0.48, Math.cos(smooth.yaw * 1.35));
+
+              const cosA = Math.cos(smooth.angle);
+              const sinA = Math.sin(smooth.angle);
+
+              // Compute exact front frame lateral hinge positions in world canvas coordinates
+              const hingeLocalY = (-adminAnchorY + 0.32) * smooth.height;
+              const rHingeLocalX = -adminAnchorX * smooth.width * yawCos;
+              const lHingeLocalX = (1 - adminAnchorX) * smooth.width * yawCos;
+
+              const rHingeX = smooth.x + (rHingeLocalX * cosA - hingeLocalY * sinA);
+              const rHingeY = smooth.y + (rHingeLocalX * sinA + hingeLocalY * cosA);
+
+              const lHingeX = smooth.x + (lHingeLocalX * cosA - hingeLocalY * sinA);
+              const lHingeY = smooth.y + (lHingeLocalX * sinA + hingeLocalY * cosA);
+
+              // 1. Side Arm Profile Rendering (attaches seamlessly from front frame hinge back to ear)
+              const absYaw = Math.abs(smooth.yaw);
+              const sideAlpha = sideImg ? Math.max(0, Math.min(1.0, (absYaw - 0.06) / 0.10)) : 0;
+
+              if (sideImg && sideAlpha > 0.01) {
+                const adminSideAnchorX = activeProduct.tryon_side_anchor_x ?? 0.15;
+                const adminSideAnchorY = activeProduct.tryon_side_anchor_y ?? 0.50;
+                const adminSideScale = activeProduct.tryon_side_scale ?? 1.0;
+                const sideAspect = sideAspectRef.current || 2.5;
+
+                if (smooth.yaw > 0) {
+                  // User's Right profile is visible (head turned to user's left)
+                  const vecX = smooth.rightEarX - rHingeX;
+                  const vecY = smooth.rightEarY - rHingeY;
+                  const span = Math.hypot(vecX, vecY);
+                  const armAngle = Math.atan2(vecY, vecX);
+                  const sideWidth = Math.max(span * 1.15, smooth.width * 0.70) * adminSideScale * userScaleOffset;
+                  const sideHeight = sideWidth / sideAspect;
+
+                  ctx.save();
+                  ctx.globalAlpha = sideAlpha;
+                  ctx.translate(rHingeX, rHingeY);
+                  ctx.rotate(armAngle);
+                  ctx.scale(1, -1); // Upright orientation
+                  const drawX = -adminSideAnchorX * sideWidth;
+                  const drawY = -adminSideAnchorY * sideHeight;
+                  ctx.drawImage(sideImg, drawX, drawY, sideWidth, sideHeight);
+
+                  // Side lens coating shimmer
+                  if (lensMode === 'BLUEBLOCK') {
+                    ctx.fillStyle = 'rgba(92, 124, 250, 0.16)';
+                    ctx.beginPath();
+                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                  } else if (lensMode === 'PHOTOFUSION') {
+                    ctx.fillStyle = 'rgba(15, 23, 42, 0.52)';
+                    ctx.beginPath();
+                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                  }
+                  ctx.restore();
+                } else {
+                  // User's Left profile is visible (head turned to user's right)
+                  const vecX = smooth.leftEarX - lHingeX;
+                  const vecY = smooth.leftEarY - lHingeY;
+                  const span = Math.hypot(vecX, vecY);
+                  const armAngle = Math.atan2(vecY, vecX);
+                  const sideWidth = Math.max(span * 1.15, smooth.width * 0.70) * adminSideScale * userScaleOffset;
+                  const sideHeight = sideWidth / sideAspect;
+
+                  ctx.save();
+                  ctx.globalAlpha = sideAlpha;
+                  ctx.translate(lHingeX, lHingeY);
+                  ctx.rotate(armAngle);
+                  const drawX = -adminSideAnchorX * sideWidth;
+                  const drawY = -adminSideAnchorY * sideHeight;
+                  ctx.drawImage(sideImg, drawX, drawY, sideWidth, sideHeight);
+
+                  // Side lens coating shimmer
+                  if (lensMode === 'BLUEBLOCK') {
+                    ctx.fillStyle = 'rgba(92, 124, 250, 0.16)';
+                    ctx.beginPath();
+                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                  } else if (lensMode === 'PHOTOFUSION') {
+                    ctx.fillStyle = 'rgba(15, 23, 42, 0.52)';
+                    ctx.beginPath();
+                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                  }
+                  ctx.restore();
+                }
+              }
+
+              // 2. Front Eyewear Frame (ALWAYS rendered with full opacity across the nose bridge and eyes)
+              ctx.save();
+              ctx.globalAlpha = 1.0;
+              ctx.translate(smooth.x, smooth.y);
+              ctx.rotate(smooth.angle);
+              ctx.scale(yawCos, 1.0);
+
+              // Position frame using Admin-Calibrated Bridge Anchor Point
+              const drawX = -adminAnchorX * smooth.width;
+              const drawY = -adminAnchorY * smooth.height;
+
+              ctx.drawImage(
+                frameImg,
+                drawX,
+                drawY,
+                smooth.width,
+                smooth.height
+              );
+
+              // 4. ZEISS Lens Coating Effects (Clear, BlueBlock, PhotoFusion)
+              const lensCenterY = drawY + smooth.height * 0.52;
+              const leftLensCenterX = drawX + smooth.width * 0.27;
+              const rightLensCenterX = drawX + smooth.width * 0.73;
+              const lensRadiusX = smooth.width * 0.17;
+              const lensRadiusY = smooth.height * 0.36;
+
+              if (lensMode === 'BLUEBLOCK') {
+                ctx.fillStyle = 'rgba(92, 124, 250, 0.18)';
+                ctx.beginPath();
+                ctx.ellipse(leftLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
+                ctx.ellipse(rightLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = 'rgba(165, 180, 252, 0.35)';
+                ctx.lineWidth = Math.max(2, smooth.width * 0.008);
+                ctx.beginPath();
+                ctx.arc(leftLensCenterX, lensCenterY - lensRadiusY * 0.25, lensRadiusX * 0.7, -0.9, -0.15);
+                ctx.arc(rightLensCenterX, lensCenterY - lensRadiusY * 0.25, lensRadiusX * 0.7, -0.9, -0.15);
+                ctx.stroke();
+              } else if (lensMode === 'PHOTOFUSION') {
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.58)';
+                ctx.beginPath();
+                ctx.ellipse(leftLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
+                ctx.ellipse(rightLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+                ctx.lineWidth = Math.max(1.5, smooth.width * 0.006);
+                ctx.beginPath();
+                ctx.arc(leftLensCenterX, lensCenterY - lensRadiusY * 0.3, lensRadiusX * 0.65, -0.8, -0.2);
+                ctx.arc(rightLensCenterX, lensCenterY - lensRadiusY * 0.3, lensRadiusX * 0.65, -0.8, -0.2);
+                ctx.stroke();
+              }
+
               ctx.restore();
             }
-
-            // 2. Draw Front Eyewear Frame Cutout (Product-Specific)
-            ctx.save();
-            ctx.translate(smooth.x, smooth.y);
-            ctx.rotate(smooth.angle);
-
-            // Subtle perspective foreshortening when head turns
-            const yawCos = Math.max(0.72, Math.cos(smooth.yaw * 1.6));
-            ctx.scale(yawCos, 1.0);
-
-            // Position frame using Admin-Calibrated Bridge Anchor Point
-            const drawX = -adminAnchorX * smooth.width;
-            const drawY = -adminAnchorY * smooth.height;
-
-            ctx.drawImage(
-              frameImg,
-              drawX,
-              drawY,
-              smooth.width,
-              smooth.height
-            );
-
-            // 3. ZEISS Lens Coating Effects (Clear, BlueBlock, PhotoFusion)
-            const lensCenterY = drawY + smooth.height * 0.52;
-            const leftLensCenterX = drawX + smooth.width * 0.27;
-            const rightLensCenterX = drawX + smooth.width * 0.73;
-            const lensRadiusX = smooth.width * 0.17;
-            const lensRadiusY = smooth.height * 0.36;
-
-            if (lensMode === 'BLUEBLOCK') {
-              // ZEISS DuraVision Blue: subtle antireflective blue shimmer & streak
-              ctx.fillStyle = 'rgba(92, 124, 250, 0.18)';
-              ctx.beginPath();
-              ctx.ellipse(leftLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
-              ctx.ellipse(rightLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
-              ctx.fill();
-
-              // Blue antireflective light streak
-              ctx.strokeStyle = 'rgba(165, 180, 252, 0.35)';
-              ctx.lineWidth = Math.max(2, smooth.width * 0.008);
-              ctx.beginPath();
-              ctx.arc(leftLensCenterX, lensCenterY - lensRadiusY * 0.25, lensRadiusX * 0.7, -0.9, -0.15);
-              ctx.arc(rightLensCenterX, lensCenterY - lensRadiusY * 0.25, lensRadiusX * 0.7, -0.9, -0.15);
-              ctx.stroke();
-            } else if (lensMode === 'PHOTOFUSION') {
-              // ZEISS PhotoFusion X: rapid dynamic transition tint
-              ctx.fillStyle = 'rgba(15, 23, 42, 0.58)';
-              ctx.beginPath();
-              ctx.ellipse(leftLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
-              ctx.ellipse(rightLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
-              ctx.fill();
-
-              // Subtle high-index crystal reflection
-              ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-              ctx.lineWidth = Math.max(1.5, smooth.width * 0.006);
-              ctx.beginPath();
-              ctx.arc(leftLensCenterX, lensCenterY - lensRadiusY * 0.3, lensRadiusX * 0.65, -0.8, -0.2);
-              ctx.arc(rightLensCenterX, lensCenterY - lensRadiusY * 0.3, lensRadiusX * 0.65, -0.8, -0.2);
-              ctx.stroke();
-            }
-
-            ctx.restore();
           }
         }
-      }
+
+        animFrameIdRef.current = requestAnimationFrame(renderLoop);
+      };
 
       animFrameIdRef.current = requestAnimationFrame(renderLoop);
-    };
 
-    animFrameIdRef.current = requestAnimationFrame(renderLoop);
-
-    return () => {
-      isRunning = false;
-      if (animFrameIdRef.current) {
-        cancelAnimationFrame(animFrameIdRef.current);
-        animFrameIdRef.current = null;
-      }
-    };
-  }, [isLoadingModel, cameraError, activeProduct, userScaleOffset, userYOffset, lensMode]);
+      return () => {
+        isRunning = false;
+        if (animFrameIdRef.current) {
+          cancelAnimationFrame(animFrameIdRef.current);
+          animFrameIdRef.current = null;
+        }
+      };
+    }, [isLoadingModel, cameraError, activeProduct, userScaleOffset, userYOffset, lensMode, is3D]);
 
   // ============================================================================
   // 5. High-Resolution Snapshot Capture with Luxury Watermark
@@ -802,8 +1158,12 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
       ctx.translate(snapCanvas.width, 0);
       ctx.scale(-1, 1);
       ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
-      // 2. Draw glasses canvas
-      ctx.drawImage(canvas, 0, 0, snapCanvas.width, snapCanvas.height);
+      // 2. Draw glasses (3D WebGL model canvas or 2D canvas)
+      if (is3D && threeCanvasRef.current) {
+        ctx.drawImage(threeCanvasRef.current, 0, 0, snapCanvas.width, snapCanvas.height);
+      } else if (canvas) {
+        ctx.drawImage(canvas, 0, 0, snapCanvas.width, snapCanvas.height);
+      }
       ctx.restore();
 
       // 3. Add luxury Bapat Optics watermark
@@ -907,10 +1267,16 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             className="w-full h-full object-cover -scale-x-100"
           />
 
-          {/* 60 FPS Transparent Glasses Tracking Overlay */}
+          {/* 60 FPS Transparent Glasses Tracking Overlay (2D Canvas) */}
           <canvas
             ref={canvasRef}
-            className="absolute inset-0 w-full h-full object-cover -scale-x-100 pointer-events-none z-10"
+            className={`absolute inset-0 w-full h-full object-cover -scale-x-100 pointer-events-none z-10 ${is3D ? 'hidden' : 'block'}`}
+          />
+
+          {/* 60 FPS Three.js 3D Glasses Model Overlay */}
+          <canvas
+            ref={threeCanvasRef}
+            className={`absolute inset-0 w-full h-full object-cover -scale-x-100 pointer-events-none z-10 ${is3D ? 'block' : 'hidden'}`}
           />
 
           {/* Vision Model Loading Overlay */}
@@ -922,11 +1288,11 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
           )}
 
           {/* Product Asset Loading Badge */}
-          {isAssetLoading && !isLoadingModel && (
+          {(isAssetLoading || isSideAssetLoading) && !isLoadingModel && (
             <div className="absolute top-14 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-md border border-[#C6A15B]/40 rounded-full px-3 py-1 flex items-center gap-2 z-20 shadow-lg">
               <div className="h-3 w-3 border border-[#C6A15B] border-t-transparent rounded-full animate-spin" />
               <span className="text-[10px] text-white/90 font-mono">
-                Loading frame asset for {activeProduct.name}...
+                {is3D ? 'Loading 3D glasses model...' : isAssetLoading ? 'Loading front frame asset...' : 'Loading side frame profile...'}
               </span>
             </div>
           )}
@@ -989,6 +1355,19 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                   </span>
                 )}
               </div>
+
+              {/* Asset Type Status Pill */}
+              {is3D ? (
+                <div className="bg-black/65 backdrop-blur-md border border-[#C6A15B]/40 rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-lg">
+                  <span className="text-[10px] text-[#C6A15B] font-bold">🕶️ 3D Model Active</span>
+                  <span className="text-[9px] text-white/60 hidden sm:inline">(Front & Side 360° Tracking)</span>
+                </div>
+              ) : hasSideAsset ? (
+                <div className="bg-black/65 backdrop-blur-md border border-[#C6A15B]/40 rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-lg">
+                  <span className="text-[10px] text-[#C6A15B] font-bold">🕶️ Front + Side</span>
+                  <span className="text-[9px] text-white/60 hidden sm:inline">(Turn head for side profile)</span>
+                </div>
+              ) : null}
 
               {/* Pupillary Distance (IPD) HUD */}
               <div className="bg-black/65 backdrop-blur-md border border-white/10 rounded-full px-3 py-1 flex items-center gap-1.5 shadow-lg">
