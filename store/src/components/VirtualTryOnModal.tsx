@@ -101,11 +101,24 @@ async function getOrInitLandmarker(onProgress?: (msg: string) => void): Promise<
   return landmarkerPromise;
 }
 
+interface ProcessedAsset {
+  canvas: CanvasImageSource;
+  aspect: number;
+  cropBounds?: {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    naturalW: number;
+    naturalH: number;
+  };
+}
+
 // In-memory cache for processed transparent eyewear canvases
-const processedImageCache = new Map<string, { canvas: CanvasImageSource; aspect: number }>();
+const processedImageCache = new Map<string, ProcessedAsset>();
 
 // Clean background & detect transparent bounds without changing coordinates
-function processEyewearImage(img: HTMLImageElement): { canvas: CanvasImageSource; aspect: number } {
+function processEyewearImage(img: HTMLImageElement): ProcessedAsset {
   try {
     const naturalW = img.naturalWidth || img.width;
     const naturalH = img.naturalHeight || img.height;
@@ -147,6 +160,52 @@ function processEyewearImage(img: HTMLImageElement): { canvas: CanvasImageSource
         }
       }
       ctx.putImageData(imgData, 0, 0);
+    }
+
+    // Auto-detect tight bounding box of visible eyewear content
+    let minX = naturalW;
+    let maxX = -1;
+    let minY = naturalH;
+    let maxY = -1;
+
+    for (let y = 0; y < naturalH; y++) {
+      for (let x = 0; x < naturalW; x++) {
+        const idx = (y * naturalW + x) * 4;
+        if (data[idx + 3] > 25) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    // If visible content was found, crop out empty transparent margins
+    if (maxX > minX && maxY > minY) {
+      const contentW = maxX - minX + 1;
+      const contentH = maxY - minY + 1;
+
+      // Only crop if there is meaningful padding (>3% margin) to preserve tight calibration
+      const hasMeaningfulPadding =
+        contentW < naturalW * 0.97 ||
+        contentH < naturalH * 0.97 ||
+        minX > naturalW * 0.015 ||
+        minY > naturalH * 0.015;
+
+      if (hasMeaningfulPadding) {
+        const croppedCanvas = document.createElement('canvas');
+        croppedCanvas.width = contentW;
+        croppedCanvas.height = contentH;
+        const cropCtx = croppedCanvas.getContext('2d');
+        if (cropCtx) {
+          cropCtx.drawImage(canvas, minX, minY, contentW, contentH, 0, 0, contentW, contentH);
+          return {
+            canvas: croppedCanvas,
+            aspect: contentW / contentH,
+            cropBounds: { minX, maxX, minY, maxY, naturalW, naturalH }
+          };
+        }
+      }
     }
 
     return { canvas, aspect: canvas.width / canvas.height };
@@ -234,12 +293,14 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null);
   const frameImageRef = useRef<CanvasImageSource | null>(null);
   const frameAspectRef = useRef<number>(2.5);
+  const frameCropBoundsRef = useRef<ProcessedAsset['cropBounds'] | null>(null);
 
   // Active Eyewear Try-On Asset State (Side View for 2D PNG)
   const [isSideAssetLoading, setIsSideAssetLoading] = useState(false);
   const [hasSideAsset, setHasSideAsset] = useState(false);
   const sideImageRef = useRef<CanvasImageSource | null>(null);
   const sideAspectRef = useRef<number>(2.5);
+  const sideCropBoundsRef = useRef<ProcessedAsset['cropBounds'] | null>(null);
 
   // Customization & User Fit Calibration
   const [userScaleOffset, setUserScaleOffset] = useState(1.0);
@@ -460,12 +521,14 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
       const cached = processedImageCache.get(normalizedFrontUrl)!;
       frameImageRef.current = cached.canvas;
       frameAspectRef.current = cached.aspect;
+      frameCropBoundsRef.current = cached.cropBounds || null;
       setAssetLoadError(null);
       setIsAssetLoading(false);
     } else {
       setIsAssetLoading(true);
       setAssetLoadError(null);
       frameImageRef.current = null;
+      frameCropBoundsRef.current = null;
 
       const img = new Image();
       img.crossOrigin = 'anonymous';
@@ -477,6 +540,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
         processedImageCache.set(normalizedFrontUrl, processed);
         frameImageRef.current = processed.canvas;
         frameAspectRef.current = processed.aspect;
+        frameCropBoundsRef.current = processed.cropBounds || null;
         setAssetLoadError(null);
         setIsAssetLoading(false);
       };
@@ -484,6 +548,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
       img.onerror = () => {
         if (isCancelled) return;
         frameImageRef.current = null;
+        frameCropBoundsRef.current = null;
         setAssetLoadError(`Failed to load front try-on asset (${normalizedFrontUrl}). Please verify file in Admin Portal.`);
         setIsAssetLoading(false);
       };
@@ -495,18 +560,21 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
     if (!normalizedSideUrl) {
       sideImageRef.current = null;
+      sideCropBoundsRef.current = null;
       setHasSideAsset(false);
       setIsSideAssetLoading(false);
     } else if (processedImageCache.has(normalizedSideUrl)) {
       const cached = processedImageCache.get(normalizedSideUrl)!;
       sideImageRef.current = cached.canvas;
       sideAspectRef.current = cached.aspect;
+      sideCropBoundsRef.current = cached.cropBounds || null;
       setHasSideAsset(true);
       setIsSideAssetLoading(false);
     } else {
       setIsSideAssetLoading(true);
       setHasSideAsset(true);
       sideImageRef.current = null;
+      sideCropBoundsRef.current = null;
 
       const sideImg = new Image();
       sideImg.crossOrigin = 'anonymous';
@@ -518,6 +586,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
         processedImageCache.set(normalizedSideUrl, processed);
         sideImageRef.current = processed.canvas;
         sideAspectRef.current = processed.aspect;
+        sideCropBoundsRef.current = processed.cropBounds || null;
         setIsSideAssetLoading(false);
       };
 
@@ -788,16 +857,25 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 const rEye = landmarks[RIGHT_EYE_OUTER];
                 const lTemple = landmarks[LEFT_TEMPLE];
                 const rTemple = landmarks[RIGHT_TEMPLE];
+                const lPupil = landmarks[LEFT_PUPIL];
+                const rPupil = landmarks[RIGHT_PUPIL];
 
                 if (bridge && lEye && rEye) {
-                  const targetX = bridge.x * vidW;
-                  const targetY = bridge.y * vidH + userYOffset;
-
-                  // Eye span distance
+                  // Eye span distance (bi-ocular outer canthus width, ~95mm in adults)
                   const eyeSpan = Math.hypot(
                     (lEye.x - rEye.x) * vidW,
                     (lEye.y - rEye.y) * vidH
                   );
+
+                  // Pupillary distance (IPD, ~63mm in adults)
+                  const pupilDist = (lPupil && rPupil)
+                    ? Math.hypot((lPupil.x - rPupil.x) * vidW, (lPupil.y - rPupil.y) * vidH)
+                    : 0;
+
+                  // Temple / zygomatic head width at eye level (~135-140mm in adults)
+                  const templeDist = (lTemple && rTemple)
+                    ? Math.hypot((lTemple.x - rTemple.x) * vidW, (lTemple.y - rTemple.y) * vidH)
+                    : 0;
 
                   // Head horizontal yaw estimation (ratio between left/right eye distance to bridge)
                   const distR = Math.hypot((bridge.x - rEye.x) * vidW, (bridge.y - rEye.y) * vidH);
@@ -821,13 +899,34 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                     targetPitch = rawPitch + depthPitch;
                   }
 
-                  // Admin calibrated scale & bridge anchor with yaw correction to prevent frame shrinkage
+                  // Natural anthropometric frame sizing:
+                  // Standard adult frame width (138mm) ≈ 2.18x IPD (63mm) ≈ 1.44x outer eye span (95mm) ≈ 1.02x temple width (135mm).
+                  let naturalFrameWidth: number;
+                  if (pupilDist > 15 && templeDist > 20) {
+                    // Fuse pupil distance, temple span, and outer eye span for maximum accuracy across all distances and face shapes
+                    const wPupils = pupilDist * 2.18;
+                    const wTemples = templeDist * 1.02;
+                    const wOuterEyes = eyeSpan * 1.44;
+                    naturalFrameWidth = (wPupils * 0.40) + (wTemples * 0.30) + (wOuterEyes * 0.30);
+                  } else if (pupilDist > 15) {
+                    naturalFrameWidth = (pupilDist * 2.18 * 0.60) + (eyeSpan * 1.44 * 0.40);
+                  } else {
+                    naturalFrameWidth = eyeSpan * 1.44;
+                  }
+
+                  // De-shorten frame width during yaw rotation so turning head does not shrink the frame
+                  const yawCorrection = Math.max(0.55, Math.cos(targetYaw * 1.25));
+                  const trueFrameWidth = naturalFrameWidth / yawCorrection;
+
+                  // Apply admin calibration scale and user manual adjustment slider offset
                   const adminScale = activeProduct.tryon_scale ?? 1.0;
-                  const yawCorrection = Math.max(0.55, Math.cos(targetYaw * 1.35));
-                  const trueEyeSpan = eyeSpan / yawCorrection;
-                  const targetWidth = trueEyeSpan * 2.25 * adminScale * userScaleOffset;
+                  const targetWidth = trueFrameWidth * adminScale * userScaleOffset;
                   const aspect = frameAspectRef.current || 2.5;
                   const targetHeight = targetWidth / aspect;
+
+                  // Bridge anchor: centered horizontally on nasal bridge, vertically aligned to bridge + manual offset
+                  const targetX = bridge.x * vidW;
+                  const targetY = bridge.y * vidH + userYOffset;
 
                   // Side view cranial anchors
                   const targetLHingeX = lEye.x * vidW;
@@ -842,27 +941,48 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
                   // Adaptive velocity-responsive smoothing
                   const smooth = smoothPoseRef.current;
-                  const alpha = smooth.active ? 0.38 : 1.0;
+                  if (!smooth.active) {
+                    smooth.x = targetX;
+                    smooth.y = targetY;
+                    smooth.width = targetWidth;
+                    smooth.height = targetHeight;
+                    smooth.angle = targetAngle;
+                    smooth.yaw = targetYaw;
+                    smooth.pitch = targetPitch;
+                    smooth.leftHingeX = targetLHingeX;
+                    smooth.leftHingeY = targetLHingeY;
+                    smooth.leftEarX = targetLEarX;
+                    smooth.leftEarY = targetLEarY;
+                    smooth.rightHingeX = targetRHingeX;
+                    smooth.rightHingeY = targetRHingeY;
+                    smooth.rightEarX = targetREarX;
+                    smooth.rightEarY = targetREarY;
+                    smooth.active = true;
+                  } else {
+                    // Smooth size changes (alpha = 0.22) to prevent breathing/fluttering while tracking translation responsively
+                    const posAlpha = 0.35;
+                    const sizeAlpha = 0.22;
+                    const rotAlpha = 0.30;
 
-                  smooth.x += (targetX - smooth.x) * alpha;
-                  smooth.y += (targetY - smooth.y) * alpha;
-                  smooth.width += (targetWidth - smooth.width) * alpha;
-                  smooth.height += (targetHeight - smooth.height) * alpha;
-                  smooth.angle += (targetAngle - smooth.angle) * alpha;
-                  smooth.yaw += (targetYaw - smooth.yaw) * alpha;
-                  smooth.pitch += (targetPitch - smooth.pitch) * alpha;
+                    smooth.x += (targetX - smooth.x) * posAlpha;
+                    smooth.y += (targetY - smooth.y) * posAlpha;
+                    smooth.width += (targetWidth - smooth.width) * sizeAlpha;
+                    smooth.height += (targetHeight - smooth.height) * sizeAlpha;
+                    smooth.angle += (targetAngle - smooth.angle) * rotAlpha;
+                    smooth.yaw += (targetYaw - smooth.yaw) * rotAlpha;
+                    smooth.pitch += (targetPitch - smooth.pitch) * rotAlpha;
 
-                  smooth.leftHingeX += (targetLHingeX - smooth.leftHingeX) * alpha;
-                  smooth.leftHingeY += (targetLHingeY - smooth.leftHingeY) * alpha;
-                  smooth.leftEarX += (targetLEarX - smooth.leftEarX) * alpha;
-                  smooth.leftEarY += (targetLEarY - smooth.leftEarY) * alpha;
+                    smooth.leftHingeX += (targetLHingeX - smooth.leftHingeX) * posAlpha;
+                    smooth.leftHingeY += (targetLHingeY - smooth.leftHingeY) * posAlpha;
+                    smooth.leftEarX += (targetLEarX - smooth.leftEarX) * posAlpha;
+                    smooth.leftEarY += (targetLEarY - smooth.leftEarY) * posAlpha;
 
-                  smooth.rightHingeX += (targetRHingeX - smooth.rightHingeX) * alpha;
-                  smooth.rightHingeY += (targetRHingeY - smooth.rightHingeY) * alpha;
-                  smooth.rightEarX += (targetREarX - smooth.rightEarX) * alpha;
-                  smooth.rightEarY += (targetREarY - smooth.rightEarY) * alpha;
+                    smooth.rightHingeX += (targetRHingeX - smooth.rightHingeX) * posAlpha;
+                    smooth.rightHingeY += (targetRHingeY - smooth.rightHingeY) * posAlpha;
+                    smooth.rightEarX += (targetREarX - smooth.rightEarX) * posAlpha;
+                    smooth.rightEarY += (targetREarY - smooth.rightEarY) * posAlpha;
+                  }
 
-                  smooth.active = true;
                   smooth.framesSinceDetection = 0;
                 }
               }
@@ -912,8 +1032,8 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
               const adminAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
               const adminAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
 
-              // Scale glasses model to match face width
-              const desiredWidth = smooth.width * 1.05;
+              // Scale glasses model so model outer bounding width exactly matches facial frame width
+              const desiredWidth = smooth.width;
               const baseScale = desiredWidth / (modelBoundingWidthRef.current || 1.0);
               pivot.scale.set(baseScale, baseScale, baseScale);
 
@@ -969,8 +1089,20 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             if (smooth.active && frameImageRef.current) {
               const frameImg = frameImageRef.current;
               const sideImg = sideImageRef.current;
-              const adminAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
-              const adminAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
+
+              // Map bridge calibration coordinates from raw uploaded asset space to tight cropped frame space
+              const rawAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
+              const rawAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
+              let adminAnchorX = rawAnchorX;
+              let adminAnchorY = rawAnchorY;
+
+              const crop = frameCropBoundsRef.current;
+              if (crop) {
+                const contentW = crop.maxX - crop.minX + 1;
+                const contentH = crop.maxY - crop.minY + 1;
+                adminAnchorX = Math.max(0.05, Math.min(0.95, (rawAnchorX * crop.naturalW - crop.minX) / contentW));
+                adminAnchorY = Math.max(0.05, Math.min(0.95, (rawAnchorY * crop.naturalH - crop.minY) / contentH));
+              }
 
               // Perspective foreshortening factor for the front frame as head turns
               const yawCos = Math.max(0.48, Math.cos(smooth.yaw * 1.35));
@@ -994,8 +1126,19 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
               const sideAlpha = sideImg ? Math.max(0, Math.min(1.0, (absYaw - 0.06) / 0.10)) : 0;
 
               if (sideImg && sideAlpha > 0.01) {
-                const adminSideAnchorX = activeProduct.tryon_side_anchor_x ?? 0.15;
-                const adminSideAnchorY = activeProduct.tryon_side_anchor_y ?? 0.50;
+                const rawSideAnchorX = activeProduct.tryon_side_anchor_x ?? 0.15;
+                const rawSideAnchorY = activeProduct.tryon_side_anchor_y ?? 0.50;
+                let adminSideAnchorX = rawSideAnchorX;
+                let adminSideAnchorY = rawSideAnchorY;
+
+                const sideCrop = sideCropBoundsRef.current;
+                if (sideCrop) {
+                  const sContentW = sideCrop.maxX - sideCrop.minX + 1;
+                  const sContentH = sideCrop.maxY - sideCrop.minY + 1;
+                  adminSideAnchorX = Math.max(0.01, Math.min(0.95, (rawSideAnchorX * sideCrop.naturalW - sideCrop.minX) / sContentW));
+                  adminSideAnchorY = Math.max(0.05, Math.min(0.95, (rawSideAnchorY * sideCrop.naturalH - sideCrop.minY) / sContentH));
+                }
+
                 const adminSideScale = activeProduct.tryon_side_scale ?? 1.0;
                 const sideAspect = sideAspectRef.current || 2.5;
 
@@ -1121,20 +1264,21 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             }
           }
         }
-
-        animFrameIdRef.current = requestAnimationFrame(renderLoop);
-      };
+      }
 
       animFrameIdRef.current = requestAnimationFrame(renderLoop);
+    };
 
-      return () => {
-        isRunning = false;
-        if (animFrameIdRef.current) {
-          cancelAnimationFrame(animFrameIdRef.current);
-          animFrameIdRef.current = null;
-        }
-      };
-    }, [isLoadingModel, cameraError, activeProduct, userScaleOffset, userYOffset, lensMode, is3D]);
+    animFrameIdRef.current = requestAnimationFrame(renderLoop);
+
+    return () => {
+      isRunning = false;
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+        animFrameIdRef.current = null;
+      }
+    };
+  }, [isLoadingModel, cameraError, activeProduct, userScaleOffset, userYOffset, lensMode, is3D]);
 
   // ============================================================================
   // 5. High-Resolution Snapshot Capture with Luxury Watermark
