@@ -1,7 +1,12 @@
+import mimetypes
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from sqlalchemy import text
+
+# Register 3D model MIME types for StaticFiles serving
+mimetypes.add_type("model/gltf-binary", ".glb")
+mimetypes.add_type("model/gltf+json", ".gltf")
 from app.core.middleware import SecurityMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
@@ -17,11 +22,37 @@ try:
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_bridge_x FLOAT DEFAULT 0.5;"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_bridge_y FLOAT DEFAULT 0.45;"))
         conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_scale FLOAT DEFAULT 1.0;"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_side_image_url VARCHAR(1000);"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_side_anchor_x FLOAT DEFAULT 0.15;"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_side_anchor_y FLOAT DEFAULT 0.5;"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_side_scale FLOAT DEFAULT 1.0;"))
+        conn.execute(text("ALTER TABLE products ADD COLUMN IF NOT EXISTS tryon_asset_type VARCHAR(50) DEFAULT '2d';"))
 except Exception as e:
     print(f"Schema migration note: {e}")
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+class CORSStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+
+# Synchronize legacy/existing uploads from app/uploads into UPLOAD_DIR (ignoring old test files)
+LEGACY_UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
+if LEGACY_UPLOAD_DIR.exists() and LEGACY_UPLOAD_DIR != UPLOAD_DIR:
+    try:
+        import shutil
+        for item in LEGACY_UPLOAD_DIR.iterdir():
+            if item.is_file() and not item.name.startswith('.') and not item.name.startswith('tryon_') and not item.name.startswith('temple_arm_') and item.name != 'rayban_headliner_tryon.png':
+                dest = UPLOAD_DIR / item.name
+                if not dest.exists():
+                    shutil.copy2(item, dest)
+    except Exception as e:
+        print(f"Legacy upload sync note: {e}")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -53,7 +84,7 @@ app.include_router(crm.router, prefix=settings.API_V1_STR)
 app.include_router(uploads.router, prefix=settings.API_V1_STR)
 app.include_router(policies.router, prefix=settings.API_V1_STR)
 app.include_router(availability.router, prefix=settings.API_V1_STR)
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+app.mount("/uploads", CORSStaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 @app.get("/")
 def root():

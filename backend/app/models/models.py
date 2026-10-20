@@ -85,11 +85,17 @@ class Product(Base):
     secondary_image = Column(String(1000), nullable=True)
     video_url = Column(String(1000), nullable=True)
     
-    # 3D Virtual Try-On Asset & Calibration
-    tryon_image_url = Column(String(1000), nullable=True) # Transparent PNG cutout of frame
-    tryon_bridge_x = Column(Float, default=0.5, nullable=True) # Normalized bridge X anchor (0-1)
-    tryon_bridge_y = Column(Float, default=0.45, nullable=True) # Normalized bridge Y anchor (0-1)
-    tryon_scale = Column(Float, default=1.0, nullable=True) # Calibration scale multiplier
+    # 3D Virtual Try-On Asset & Calibration (Front & Side Views)
+    tryon_image_url = Column(String(1000), nullable=True) # Transparent PNG cutout of front frame
+    tryon_bridge_x = Column(Float, default=0.5, nullable=True) # Normalized front bridge X anchor (0-1)
+    tryon_bridge_y = Column(Float, default=0.45, nullable=True) # Normalized front bridge Y anchor (0-1)
+    tryon_scale = Column(Float, default=1.0, nullable=True) # Calibration scale multiplier for front view
+
+    tryon_side_image_url = Column(String(1000), nullable=True) # Transparent PNG cutout of frame side profile
+    tryon_side_anchor_x = Column(Float, default=0.15, nullable=True) # Normalized side hinge X anchor (0-1)
+    tryon_side_anchor_y = Column(Float, default=0.5, nullable=True) # Normalized side hinge Y anchor (0-1)
+    tryon_side_scale = Column(Float, default=1.0, nullable=True) # Calibration scale multiplier for side view
+    tryon_asset_type = Column(String(50), default="2d", nullable=True) # '2d' (PNG) or '3d' (GLB/GLTF)
 
     is_featured = Column(Boolean, default=False)
     is_bestseller = Column(Boolean, default=False)

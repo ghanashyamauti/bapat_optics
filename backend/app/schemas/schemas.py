@@ -123,6 +123,11 @@ class ProductBase(BaseModel):
     tryon_bridge_x: Optional[float] = 0.5
     tryon_bridge_y: Optional[float] = 0.45
     tryon_scale: Optional[float] = 1.0
+    tryon_side_image_url: Optional[str] = None
+    tryon_side_anchor_x: Optional[float] = 0.15
+    tryon_side_anchor_y: Optional[float] = 0.5
+    tryon_side_scale: Optional[float] = 1.0
+    tryon_asset_type: Optional[str] = "2d"
     is_featured: Optional[bool] = False
     is_bestseller: Optional[bool] = False
     is_active: Optional[bool] = True
@@ -154,6 +159,11 @@ class ProductUpdate(BaseModel):
     tryon_bridge_x: Optional[float] = None
     tryon_bridge_y: Optional[float] = None
     tryon_scale: Optional[float] = None
+    tryon_side_image_url: Optional[str] = None
+    tryon_side_anchor_x: Optional[float] = None
+    tryon_side_anchor_y: Optional[float] = None
+    tryon_side_scale: Optional[float] = None
+    tryon_asset_type: Optional[str] = None
     additional_images: Optional[List[str]] = None
     is_featured: Optional[bool] = None
     is_bestseller: Optional[bool] = None

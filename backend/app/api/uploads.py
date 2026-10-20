@@ -7,9 +7,19 @@ from app.api.deps import get_current_active_admin
 from app.models.models import User
 
 router = APIRouter(prefix="/uploads", tags=["Admin uploads"])
-UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
+UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
+LEGACY_UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/avif"}
+ALLOWED_MODEL_TYPES = {
+    "model/gltf-binary",
+    "model/gltf+json",
+    "application/octet-stream",
+    "application/json",
+    "model/gltf",
+}
+ALLOWED_MODEL_EXTENSIONS = {".glb", ".gltf"}
 MAX_BYTES = 8 * 1024 * 1024
+MAX_MODEL_BYTES = 30 * 1024 * 1024
 
 
 @router.post("/image")
@@ -17,8 +27,26 @@ async def upload_image(
     file: UploadFile = File(...),
     _: User = Depends(get_current_active_admin),
 ):
+    ext = Path(file.filename or "").suffix.lower()
+    is_model = ext in ALLOWED_MODEL_EXTENSIONS or (file.content_type in ALLOWED_MODEL_TYPES and ext in ALLOWED_MODEL_EXTENSIONS)
+    
+    if is_model:
+        data = await file.read(MAX_MODEL_BYTES + 1)
+        if len(data) > MAX_MODEL_BYTES:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="3D model must be 30MB or smaller")
+        suffix = ext if ext in ALLOWED_MODEL_EXTENSIONS else ".glb"
+        filename = f"model_{uuid4().hex}{suffix}"
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (UPLOAD_DIR / filename).write_bytes(data)
+        try:
+            LEGACY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            (LEGACY_UPLOAD_DIR / filename).write_bytes(data)
+        except Exception:
+            pass
+        return {"url": f"/uploads/{filename}", "filename": filename, "content_type": file.content_type or "model/gltf-binary", "asset_type": "3d"}
+
     if file.content_type not in ALLOWED_TYPES:
-        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Only JPEG, PNG, WebP or AVIF images are allowed")
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Only JPEG, PNG, WebP or AVIF images, or GLB/GLTF 3D models are allowed")
     data = await file.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Image must be 8MB or smaller")
@@ -26,7 +54,41 @@ async def upload_image(
     filename = f"{uuid4().hex}{suffix}"
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     (UPLOAD_DIR / filename).write_bytes(data)
-    return {"url": f"/uploads/{filename}", "filename": filename, "content_type": file.content_type}
+    try:
+        LEGACY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (LEGACY_UPLOAD_DIR / filename).write_bytes(data)
+    except Exception:
+        pass
+    return {"url": f"/uploads/{filename}", "filename": filename, "content_type": file.content_type, "asset_type": "2d"}
+
+
+@router.post("/model")
+async def upload_model(
+    file: UploadFile = File(...),
+    _: User = Depends(get_current_active_admin),
+):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_MODEL_EXTENSIONS and file.content_type not in ALLOWED_MODEL_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Only GLB or GLTF 3D glasses model files are allowed"
+        )
+    data = await file.read(MAX_MODEL_BYTES + 1)
+    if len(data) > MAX_MODEL_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="3D Model must be 30MB or smaller"
+        )
+    suffix = ext if ext in ALLOWED_MODEL_EXTENSIONS else (".glb" if "binary" in (file.content_type or "") else ".gltf")
+    filename = f"model_{uuid4().hex}{suffix}"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    (UPLOAD_DIR / filename).write_bytes(data)
+    try:
+        LEGACY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (LEGACY_UPLOAD_DIR / filename).write_bytes(data)
+    except Exception:
+        pass
+    return {"url": f"/uploads/{filename}", "filename": filename, "content_type": file.content_type or "model/gltf-binary", "asset_type": "3d"}
 
 
 ALLOWED_VIDEO_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/ogg", "video/x-matroska"}
@@ -59,4 +121,9 @@ async def upload_video(
     filename = f"vid_{uuid4().hex}{suffix}"
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     (UPLOAD_DIR / filename).write_bytes(data)
+    try:
+        LEGACY_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        (LEGACY_UPLOAD_DIR / filename).write_bytes(data)
+    except Exception:
+        pass
     return {"url": f"/uploads/{filename}", "filename": filename, "content_type": file.content_type}
