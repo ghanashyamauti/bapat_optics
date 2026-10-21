@@ -28,8 +28,12 @@ const RIGHT_EYE_OUTER = 33;  // Lateral canthus of user's right eye
 const LEFT_EYE_OUTER = 263;  // Lateral canthus of user's left eye
 const RIGHT_PUPIL = 468;
 const LEFT_PUPIL = 473;
-const RIGHT_TEMPLE = 234;    // Right zygomatic arch / ear connection
-const LEFT_TEMPLE = 454;     // Left zygomatic arch / ear connection
+const RIGHT_TEMPLE = 234;    // Right zygomatic arch / cheek margin
+const LEFT_TEMPLE = 454;     // Left zygomatic arch / cheek margin
+const RIGHT_EAR_TRAGUS = 127; // Preauricular notch near right tragus
+const LEFT_EAR_TRAGUS = 356;  // Preauricular notch near left tragus
+const RIGHT_EAR_TOP = 162;    // Right upper temporal hairline near ear attachment
+const LEFT_EAR_TOP = 389;     // Left upper temporal hairline near ear attachment
 const FOREHEAD_TOP = 10;     // Frontal bone near trichion
 const CHIN_BOTTOM = 152;     // Gnathion
 const JAW_LEFT = 172;
@@ -251,6 +255,14 @@ function is3DModelAsset(url?: string | null): boolean {
   return clean.endsWith('.glb') || clean.endsWith('.gltf');
 }
 
+// Shortest-path angular difference for smooth circular rotation updates
+function diffAngle(target: number, current: number): number {
+  let diff = (target - current) % (Math.PI * 2);
+  if (diff > Math.PI) diff -= Math.PI * 2;
+  if (diff < -Math.PI) diff += Math.PI * 2;
+  return diff;
+}
+
 interface TryOnContentProps {
   product: Product;
 }
@@ -295,13 +307,6 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   const frameAspectRef = useRef<number>(2.5);
   const frameCropBoundsRef = useRef<ProcessedAsset['cropBounds'] | null>(null);
 
-  // Active Eyewear Try-On Asset State (Side View for 2D PNG)
-  const [isSideAssetLoading, setIsSideAssetLoading] = useState(false);
-  const [hasSideAsset, setHasSideAsset] = useState(false);
-  const sideImageRef = useRef<CanvasImageSource | null>(null);
-  const sideAspectRef = useRef<number>(2.5);
-  const sideCropBoundsRef = useRef<ProcessedAsset['cropBounds'] | null>(null);
-
   // Customization & User Fit Calibration
   const [userScaleOffset, setUserScaleOffset] = useState(1.0);
   const [userYOffset, setUserYOffset] = useState(0);
@@ -330,15 +335,6 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
     angle: 0,
     yaw: 0,
     pitch: 0,
-    leftHingeX: 0,
-    leftHingeY: 0,
-    leftEarX: 0,
-    leftEarY: 0,
-    rightHingeX: 0,
-    rightHingeY: 0,
-    rightEarX: 0,
-    rightEarY: 0,
-    sideBlend: 0,
     active: false,
     framesSinceDetection: 0
   });
@@ -431,10 +427,8 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
     if (!normalizedFrontUrl) {
       frameImageRef.current = null;
-      sideImageRef.current = null;
       if (threeModelGroupRef.current) threeModelGroupRef.current.clear();
       loadedModelUrlRef.current = null;
-      setHasSideAsset(false);
       setAssetLoadError('No Virtual Try-On asset configured for this product in Admin Portal.');
       setIsAssetLoading(false);
       return;
@@ -443,8 +437,6 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
     // --- CASE A: 3D Glasses Model (.glb / .gltf) ---
     if (productIs3D) {
       frameImageRef.current = null;
-      sideImageRef.current = null;
-      setHasSideAsset(true); // 3D models provide front and side geometry naturally
 
       if (loadedModelUrlRef.current === normalizedFrontUrl && threeModelGroupRef.current?.children.length) {
         setAssetLoadError(null);
@@ -461,25 +453,134 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             if (isCancelled) return;
             const model = gltf.scene;
 
-            // Center geometry around nasal bridge origin
+            // 1. Identify key eyewear components: front frame, lenses, and frame material
+            // Checks mesh, parent node, and material names to support standard FBX/GLTF/Collada models
+            let frontMesh: THREE.Mesh | null = null;
+            let lensMesh: THREE.Mesh | null = null;
+            let frameMat: THREE.Material | null = null;
+
+            model.traverse((child: any) => {
+              if (child.isMesh) {
+                const names = [
+                  child.name || '',
+                  child.parent?.name || '',
+                  child.parent?.parent?.name || '',
+                  child.material?.name || ''
+                ].join(' ').toLowerCase();
+
+                const isLens = names.includes('lens') || names.includes('glass') || names.includes('lente') || names.includes('verre') || names.includes('cristal');
+                const isFrame = names.includes('frame') || names.includes('main') || names.includes('front') || names.includes('armacao') || names.includes('montura') || names.includes('rim');
+
+                if (isLens) {
+                  if (!lensMesh) lensMesh = child;
+                } else if (isFrame) {
+                  if (!frontMesh) frontMesh = child;
+                  if (child.material && !frameMat) frameMat = child.material;
+                }
+                if (!frameMat && child.material && !isLens) {
+                  frameMat = child.material;
+                }
+              }
+            });
+
+            // 2. Detect and correct coordinate orientation:
+            // Standard eyewear convention requires width along X, height along Y, and temples extending along -Z.
+            // Some GLB files (e.g. FBX/Collada exports) have front frame width along Z and temples along +/-X.
+            const rawBox = new THREE.Box3().setFromObject(model);
+            const rawSize = rawBox.getSize(new THREE.Vector3());
+
+            const frontRef = frontMesh || lensMesh;
+            let needsRotateY = false;
+            if (frontRef) {
+              const fSize = new THREE.Box3().setFromObject(frontRef).getSize(new THREE.Vector3());
+              // A front frame or lens is a wide, flat structure: its width dimension is significantly larger than its thickness.
+              // If its Z extent is larger than its X extent, the front frame width is along Z instead of X.
+              if (fSize.z > fSize.x * 1.5) {
+                needsRotateY = true;
+              }
+            } else if (rawSize.z > rawSize.x * 1.2) {
+              needsRotateY = true;
+            }
+
+            if (needsRotateY) {
+              // Rotate around Y so width aligns with X and temples align with -Z
+              model.rotation.y = -Math.PI / 2;
+              model.updateMatrixWorld(true);
+
+              // Verify whether temples extend backward along -Z towards ears or forward towards camera.
+              // In standard orientation, front frame is closer to +Z, and temples extend backward towards -Z.
+              const checkRef = frontMesh || lensMesh;
+              if (checkRef) {
+                const testBox = new THREE.Box3().setFromObject(model);
+                const testSize = testBox.getSize(new THREE.Vector3());
+                const refBox = new THREE.Box3().setFromObject(checkRef);
+
+                const extendsForward = (testBox.max.z - refBox.max.z) > (testSize.z * 0.15);
+                const extendsBackward = (refBox.min.z - testBox.min.z) > (testSize.z * 0.15);
+
+                // If temples extend forward (+Z) instead of backward (-Z), flip 180 degrees to +PI/2
+                if (extendsForward && !extendsBackward) {
+                  model.rotation.y = Math.PI / 2;
+                  model.updateMatrixWorld(true);
+                }
+              }
+            }
+
+            // 3. Compute normalized bounding box and nasal bridge center
             const box = new THREE.Box3().setFromObject(model);
             const center = box.getCenter(new THREE.Vector3());
             const size = box.getSize(new THREE.Vector3());
 
-            model.position.x = -center.x;
-            model.position.y = -center.y;
-            model.position.z = -center.z;
+            const activeFrontRef = frontMesh || lensMesh;
+            const frontCenter = activeFrontRef
+              ? new THREE.Box3().setFromObject(activeFrontRef).getCenter(new THREE.Vector3())
+              : new THREE.Vector3(center.x, center.y, box.max.z);
+
+            // Nose bridge is horizontally centered on the frame symmetry axis (center.x),
+            // vertically aligned with the front frame (frontCenter.y),
+            // and anchored at the front frame plane in depth (frontCenter.z).
+            const bridgeAnchor = new THREE.Vector3(center.x, frontCenter.y, frontCenter.z);
+
+            // Center horizontally (X) and vertically (Y) on the front bridge,
+            // and anchor front frame at Z = 0 so temples rotate naturally back towards the ears
+            model.position.x = -bridgeAnchor.x;
+            model.position.y = -bridgeAnchor.y;
+            model.position.z = -bridgeAnchor.z;
 
             const pivot = new THREE.Group();
             pivot.add(model);
 
             modelBoundingWidthRef.current = Math.max(0.001, size.x);
 
-            // Enhance materials for luxury eyewear realism
+            // 4. Enhance materials & correct temple material assignments
             model.traverse((child: any) => {
               if (child.isMesh && child.material) {
                 child.castShadow = false;
                 child.receiveShadow = false;
+
+                const names = [
+                  child.name || '',
+                  child.parent?.name || '',
+                  child.material?.name || ''
+                ].join(' ').toLowerCase();
+
+                // If a temple arm body is incorrectly using a gold/screw material while the glasses
+                // have black/dark temples, assign the product's original frame material
+                const isTempleArm = (names.includes('dushka') || names.includes('handle') || names.includes('temple') || names.includes('haste') || names.includes('arm')) &&
+                                    !names.includes('vint') && !names.includes('screw') && !names.includes('hinge') && !names.includes('kr');
+                const isGoldMat = names.includes('metal_2') || names.includes('gold') || names.includes('brass');
+
+                if (isTempleArm && isGoldMat && frameMat) {
+                  child.material = frameMat;
+                }
+
+                // Transparent lenses: disable depthWrite and elevate renderOrder to prevent depth-buffer clipping
+                if (names.includes('lens') || names.includes('glass') || names.includes('lente') || names.includes('verre') || names.includes('cristal')) {
+                  child.material.transparent = true;
+                  child.material.depthWrite = false;
+                  child.renderOrder = 2;
+                }
+
                 if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
                   child.material.envMapIntensity = 1.3;
                   child.material.needsUpdate = true;
@@ -551,51 +652,6 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
         frameCropBoundsRef.current = null;
         setAssetLoadError(`Failed to load front try-on asset (${normalizedFrontUrl}). Please verify file in Admin Portal.`);
         setIsAssetLoading(false);
-      };
-    }
-
-    // --- Side View PNG (Dual-View Support) ---
-    const rawSideUrl = activeProduct.tryon_side_image_url;
-    const normalizedSideUrl = normalizeTryonUrl(rawSideUrl);
-
-    if (!normalizedSideUrl) {
-      sideImageRef.current = null;
-      sideCropBoundsRef.current = null;
-      setHasSideAsset(false);
-      setIsSideAssetLoading(false);
-    } else if (processedImageCache.has(normalizedSideUrl)) {
-      const cached = processedImageCache.get(normalizedSideUrl)!;
-      sideImageRef.current = cached.canvas;
-      sideAspectRef.current = cached.aspect;
-      sideCropBoundsRef.current = cached.cropBounds || null;
-      setHasSideAsset(true);
-      setIsSideAssetLoading(false);
-    } else {
-      setIsSideAssetLoading(true);
-      setHasSideAsset(true);
-      sideImageRef.current = null;
-      sideCropBoundsRef.current = null;
-
-      const sideImg = new Image();
-      sideImg.crossOrigin = 'anonymous';
-      sideImg.src = normalizedSideUrl;
-
-      sideImg.onload = () => {
-        if (isCancelled) return;
-        const processed = processEyewearImage(sideImg);
-        processedImageCache.set(normalizedSideUrl, processed);
-        sideImageRef.current = processed.canvas;
-        sideAspectRef.current = processed.aspect;
-        sideCropBoundsRef.current = processed.cropBounds || null;
-        setIsSideAssetLoading(false);
-      };
-
-      sideImg.onerror = () => {
-        if (isCancelled) return;
-        console.warn(`Failed to load side try-on asset (${normalizedSideUrl}). Front view will be used.`);
-        sideImageRef.current = null;
-        setHasSideAsset(false);
-        setIsSideAssetLoading(false);
       };
     }
 
@@ -859,51 +915,61 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 const rTemple = landmarks[RIGHT_TEMPLE];
                 const lPupil = landmarks[LEFT_PUPIL];
                 const rPupil = landmarks[RIGHT_PUPIL];
+                const rEarTragus = landmarks[RIGHT_EAR_TRAGUS];
+                const lEarTragus = landmarks[LEFT_EAR_TRAGUS];
+                const rEarTop = landmarks[RIGHT_EAR_TOP];
+                const lEarTop = landmarks[LEFT_EAR_TOP];
 
                 if (bridge && lEye && rEye) {
-                  // Eye span distance (bi-ocular outer canthus width, ~95mm in adults)
-                  const eyeSpan = Math.hypot(
-                    (lEye.x - rEye.x) * vidW,
-                    (lEye.y - rEye.y) * vidH
-                  );
+                  // Eye span distance in 3D (rotation-invariant Euclidean distance)
+                  const eyeDx = (lEye.x - rEye.x) * vidW;
+                  const eyeDy = (lEye.y - rEye.y) * vidH;
+                  const eyeDz = ((lEye.z ?? 0) - (rEye.z ?? 0)) * vidW;
+                  const eyeSpan = Math.hypot(eyeDx, eyeDy, eyeDz);
 
-                  // Pupillary distance (IPD, ~63mm in adults)
-                  const pupilDist = (lPupil && rPupil)
-                    ? Math.hypot((lPupil.x - rPupil.x) * vidW, (lPupil.y - rPupil.y) * vidH)
-                    : 0;
+                  // Pupillary distance in 3D
+                  const pDx = lPupil && rPupil ? (lPupil.x - rPupil.x) * vidW : 0;
+                  const pDy = lPupil && rPupil ? (lPupil.y - rPupil.y) * vidH : 0;
+                  const pDz = lPupil && rPupil ? ((lPupil.z ?? 0) - (rPupil.z ?? 0)) * vidW : 0;
+                  const pupilDist = lPupil && rPupil ? Math.hypot(pDx, pDy, pDz) : 0;
 
-                  // Temple / zygomatic head width at eye level (~135-140mm in adults)
-                  const templeDist = (lTemple && rTemple)
-                    ? Math.hypot((lTemple.x - rTemple.x) * vidW, (lTemple.y - rTemple.y) * vidH)
-                    : 0;
+                  // Temple / zygomatic head width at eye level in 3D
+                  const tDx = lTemple && rTemple ? (lTemple.x - rTemple.x) * vidW : 0;
+                  const tDy = lTemple && rTemple ? (lTemple.y - rTemple.y) * vidH : 0;
+                  const tDz = lTemple && rTemple ? ((lTemple.z ?? 0) - (rTemple.z ?? 0)) * vidW : 0;
+                  const templeDist = lTemple && rTemple ? Math.hypot(tDx, tDy, tDz) : 0;
 
-                  // Head horizontal yaw estimation (ratio between left/right eye distance to bridge)
-                  const distR = Math.hypot((bridge.x - rEye.x) * vidW, (bridge.y - rEye.y) * vidH);
-                  const distL = Math.hypot((lEye.x - bridge.x) * vidW, (lEye.y - bridge.y) * vidH);
-                  const targetYaw = (distR - distL) / ((distR + distL) || 1);
+                  // 1. Precise Head Yaw (horizontal rotation in XZ plane)
+                  const eyeYaw = Math.atan2(eyeDz, eyeDx);
 
-                  // Head roll angle
-                  const targetAngle = Math.atan2(
-                    (lEye.y - rEye.y) * vidH,
-                    (lEye.x - rEye.x) * vidW
-                  );
+                  // Nasal bridge-to-eye horizontal asymmetry (stable cranial anchor):
+                  // In frontal view, bridge sits halfway between pupils/eyes (dL ≈ dR).
+                  // When head turns, bridge shifts towards the near eye proportionally to tan(yaw).
+                  const dL = Math.max(1, (lEye.x - bridge.x) * vidW);
+                  const dR = Math.max(1, (bridge.x - rEye.x) * vidW);
+                  const asymYaw = Math.atan2((dR - dL) * 1.8, dR + dL);
 
-                  // Head pitch angle estimation
+                  // Fuse 3D eye depth vector with 2D nasal asymmetry for drift-free yaw tracking
+                  const rawTargetYaw = eyeYaw * 0.60 + asymYaw * 0.40;
+                  const targetYaw = Math.max(-0.95, Math.min(0.95, rawTargetYaw));
+
+                  // 2. Precise Head Roll (in-plane tilt in XY plane)
+                  const targetAngle = Math.atan2(eyeDy, eyeDx);
+
+                  // 3. Precise Head Pitch (sagittal nod in YZ plane)
                   const forehead = landmarks[FOREHEAD_TOP];
                   const chin = landmarks[CHIN_BOTTOM];
                   let targetPitch = 0;
-                  if (forehead && chin && bridge) {
-                    const midY = (forehead.y + chin.y) / 2;
-                    const rawPitch = (bridge.y - midY) * 2.2;
-                    const depthPitch = (chin.z !== undefined && forehead.z !== undefined) ? (chin.z - forehead.z) * 1.6 : 0;
-                    targetPitch = rawPitch + depthPitch;
+                  if (forehead && chin) {
+                    const fDy = (chin.y - forehead.y) * vidH;
+                    const fDz = ((chin.z ?? 0) - (forehead.z ?? 0)) * vidW;
+                    targetPitch = Math.max(-0.65, Math.min(0.65, Math.atan2(fDz, Math.max(10, fDy))));
                   }
 
-                  // Natural anthropometric frame sizing:
+                  // Natural anthropometric frame sizing (3D rotation-invariant):
                   // Standard adult frame width (138mm) ≈ 2.18x IPD (63mm) ≈ 1.44x outer eye span (95mm) ≈ 1.02x temple width (135mm).
                   let naturalFrameWidth: number;
                   if (pupilDist > 15 && templeDist > 20) {
-                    // Fuse pupil distance, temple span, and outer eye span for maximum accuracy across all distances and face shapes
                     const wPupils = pupilDist * 2.18;
                     const wTemples = templeDist * 1.02;
                     const wOuterEyes = eyeSpan * 1.44;
@@ -914,31 +980,16 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                     naturalFrameWidth = eyeSpan * 1.44;
                   }
 
-                  // De-shorten frame width during yaw rotation so turning head does not shrink the frame
-                  const yawCorrection = Math.max(0.55, Math.cos(targetYaw * 1.25));
-                  const trueFrameWidth = naturalFrameWidth / yawCorrection;
-
                   // Apply admin calibration scale and user manual adjustment slider offset
+                  // In 3D space, natural 3D foreshortening is handled by Three.js perspective camera
                   const adminScale = activeProduct.tryon_scale ?? 1.0;
-                  const targetWidth = trueFrameWidth * adminScale * userScaleOffset;
+                  const targetWidth = naturalFrameWidth * adminScale * userScaleOffset;
                   const aspect = frameAspectRef.current || 2.5;
                   const targetHeight = targetWidth / aspect;
 
                   // Bridge anchor: centered horizontally on nasal bridge, vertically aligned to bridge + manual offset
                   const targetX = bridge.x * vidW;
                   const targetY = bridge.y * vidH + userYOffset;
-
-                  // Side view cranial anchors
-                  const targetLHingeX = lEye.x * vidW;
-                  const targetLHingeY = lEye.y * vidH + userYOffset;
-                  const targetLEarX = (lTemple ? lTemple.x : (lEye.x + 0.15)) * vidW;
-                  const targetLEarY = (lTemple ? lTemple.y : lEye.y) * vidH + userYOffset;
-
-                  const targetRHingeX = rEye.x * vidW;
-                  const targetRHingeY = rEye.y * vidH + userYOffset;
-                  const targetREarX = (rTemple ? rTemple.x : (rEye.x - 0.15)) * vidW;
-                  const targetREarY = (rTemple ? rTemple.y : rEye.y) * vidH + userYOffset;
-
                   // Adaptive velocity-responsive smoothing
                   const smooth = smoothPoseRef.current;
                   if (!smooth.active) {
@@ -949,38 +1000,24 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                     smooth.angle = targetAngle;
                     smooth.yaw = targetYaw;
                     smooth.pitch = targetPitch;
-                    smooth.leftHingeX = targetLHingeX;
-                    smooth.leftHingeY = targetLHingeY;
-                    smooth.leftEarX = targetLEarX;
-                    smooth.leftEarY = targetLEarY;
-                    smooth.rightHingeX = targetRHingeX;
-                    smooth.rightHingeY = targetRHingeY;
-                    smooth.rightEarX = targetREarX;
-                    smooth.rightEarY = targetREarY;
                     smooth.active = true;
                   } else {
-                    // Smooth size changes (alpha = 0.22) to prevent breathing/fluttering while tracking translation responsively
-                    const posAlpha = 0.35;
-                    const sizeAlpha = 0.22;
-                    const rotAlpha = 0.30;
+                    // Velocity-adaptive smoothing: responsive during fast movement, stable and jitter-free when resting
+                    const posDelta = Math.hypot(targetX - smooth.x, targetY - smooth.y);
+                    const posAlpha = Math.min(0.75, Math.max(0.38, (posDelta / 30) * 0.4 + 0.38));
+
+                    const yawDelta = Math.abs(diffAngle(targetYaw, smooth.yaw));
+                    const rotAlpha = Math.min(0.75, Math.max(0.35, yawDelta * 2.0 + 0.35));
+
+                    const sizeAlpha = 0.25;
 
                     smooth.x += (targetX - smooth.x) * posAlpha;
                     smooth.y += (targetY - smooth.y) * posAlpha;
                     smooth.width += (targetWidth - smooth.width) * sizeAlpha;
                     smooth.height += (targetHeight - smooth.height) * sizeAlpha;
-                    smooth.angle += (targetAngle - smooth.angle) * rotAlpha;
-                    smooth.yaw += (targetYaw - smooth.yaw) * rotAlpha;
-                    smooth.pitch += (targetPitch - smooth.pitch) * rotAlpha;
-
-                    smooth.leftHingeX += (targetLHingeX - smooth.leftHingeX) * posAlpha;
-                    smooth.leftHingeY += (targetLHingeY - smooth.leftHingeY) * posAlpha;
-                    smooth.leftEarX += (targetLEarX - smooth.leftEarX) * posAlpha;
-                    smooth.leftEarY += (targetLEarY - smooth.leftEarY) * posAlpha;
-
-                    smooth.rightHingeX += (targetRHingeX - smooth.rightHingeX) * posAlpha;
-                    smooth.rightHingeY += (targetRHingeY - smooth.rightHingeY) * posAlpha;
-                    smooth.rightEarX += (targetREarX - smooth.rightEarX) * posAlpha;
-                    smooth.rightEarY += (targetREarY - smooth.rightEarY) * posAlpha;
+                    smooth.angle += diffAngle(targetAngle, smooth.angle) * rotAlpha;
+                    smooth.yaw += diffAngle(targetYaw, smooth.yaw) * rotAlpha;
+                    smooth.pitch += diffAngle(targetPitch, smooth.pitch) * rotAlpha;
                   }
 
                   smooth.framesSinceDetection = 0;
@@ -1042,28 +1079,33 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
               const posY = -(smooth.y - vidH / 2) + (adminAnchorY - 0.45) * smooth.height;
               pivot.position.set(posX, posY, 0);
 
-              // 3D rotations for roll, yaw, pitch
+              // 3D rotations for roll, yaw, pitch with cranial YXZ rotation order (1:1 head-pose tracking)
+              pivot.rotation.order = 'YXZ';
               pivot.rotation.z = -smooth.angle;
-              pivot.rotation.y = smooth.yaw * 1.45;
-              pivot.rotation.x = smooth.pitch * 0.95;
+              pivot.rotation.y = smooth.yaw;
+              pivot.rotation.x = smooth.pitch;
 
               // Lens tint coating effects
               pivot.traverse((child: any) => {
                 if (child.isMesh && child.material) {
-                  const mName = (child.name || '').toLowerCase();
-                  if (mName.includes('lens') || mName.includes('glass')) {
+                  const names = [
+                    child.name || '',
+                    child.parent?.name || '',
+                    child.material?.name || ''
+                  ].join(' ').toLowerCase();
+                  if (names.includes('lens') || names.includes('glass') || names.includes('lente') || names.includes('verre') || names.includes('cristal')) {
+                    child.material.transparent = true;
+                    child.material.depthWrite = false;
+                    child.renderOrder = 2;
                     if (lensMode === 'BLUEBLOCK') {
                       child.material.color = new THREE.Color(0x99bbff);
                       child.material.opacity = 0.85;
-                      child.material.transparent = true;
                     } else if (lensMode === 'PHOTOFUSION') {
                       child.material.color = new THREE.Color(0x222233);
                       child.material.opacity = 0.9;
-                      child.material.transparent = true;
                     } else {
                       child.material.color = new THREE.Color(0xffffff);
                       child.material.opacity = 0.65;
-                      child.material.transparent = true;
                     }
                   }
                 }
@@ -1088,7 +1130,6 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             // ====================================================================
             if (smooth.active && frameImageRef.current) {
               const frameImg = frameImageRef.current;
-              const sideImg = sideImageRef.current;
 
               // Map bridge calibration coordinates from raw uploaded asset space to tight cropped frame space
               const rawAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
@@ -1105,106 +1146,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
               }
 
               // Perspective foreshortening factor for the front frame as head turns
-              const yawCos = Math.max(0.48, Math.cos(smooth.yaw * 1.35));
-
-              const cosA = Math.cos(smooth.angle);
-              const sinA = Math.sin(smooth.angle);
-
-              // Compute exact front frame lateral hinge positions in world canvas coordinates
-              const hingeLocalY = (-adminAnchorY + 0.32) * smooth.height;
-              const rHingeLocalX = -adminAnchorX * smooth.width * yawCos;
-              const lHingeLocalX = (1 - adminAnchorX) * smooth.width * yawCos;
-
-              const rHingeX = smooth.x + (rHingeLocalX * cosA - hingeLocalY * sinA);
-              const rHingeY = smooth.y + (rHingeLocalX * sinA + hingeLocalY * cosA);
-
-              const lHingeX = smooth.x + (lHingeLocalX * cosA - hingeLocalY * sinA);
-              const lHingeY = smooth.y + (lHingeLocalX * sinA + hingeLocalY * cosA);
-
-              // 1. Side Arm Profile Rendering (attaches seamlessly from front frame hinge back to ear)
-              const absYaw = Math.abs(smooth.yaw);
-              const sideAlpha = sideImg ? Math.max(0, Math.min(1.0, (absYaw - 0.06) / 0.10)) : 0;
-
-              if (sideImg && sideAlpha > 0.01) {
-                const rawSideAnchorX = activeProduct.tryon_side_anchor_x ?? 0.15;
-                const rawSideAnchorY = activeProduct.tryon_side_anchor_y ?? 0.50;
-                let adminSideAnchorX = rawSideAnchorX;
-                let adminSideAnchorY = rawSideAnchorY;
-
-                const sideCrop = sideCropBoundsRef.current;
-                if (sideCrop) {
-                  const sContentW = sideCrop.maxX - sideCrop.minX + 1;
-                  const sContentH = sideCrop.maxY - sideCrop.minY + 1;
-                  adminSideAnchorX = Math.max(0.01, Math.min(0.95, (rawSideAnchorX * sideCrop.naturalW - sideCrop.minX) / sContentW));
-                  adminSideAnchorY = Math.max(0.05, Math.min(0.95, (rawSideAnchorY * sideCrop.naturalH - sideCrop.minY) / sContentH));
-                }
-
-                const adminSideScale = activeProduct.tryon_side_scale ?? 1.0;
-                const sideAspect = sideAspectRef.current || 2.5;
-
-                if (smooth.yaw > 0) {
-                  // User's Right profile is visible (head turned to user's left)
-                  const vecX = smooth.rightEarX - rHingeX;
-                  const vecY = smooth.rightEarY - rHingeY;
-                  const span = Math.hypot(vecX, vecY);
-                  const armAngle = Math.atan2(vecY, vecX);
-                  const sideWidth = Math.max(span * 1.15, smooth.width * 0.70) * adminSideScale * userScaleOffset;
-                  const sideHeight = sideWidth / sideAspect;
-
-                  ctx.save();
-                  ctx.globalAlpha = sideAlpha;
-                  ctx.translate(rHingeX, rHingeY);
-                  ctx.rotate(armAngle);
-                  ctx.scale(1, -1); // Upright orientation
-                  const drawX = -adminSideAnchorX * sideWidth;
-                  const drawY = -adminSideAnchorY * sideHeight;
-                  ctx.drawImage(sideImg, drawX, drawY, sideWidth, sideHeight);
-
-                  // Side lens coating shimmer
-                  if (lensMode === 'BLUEBLOCK') {
-                    ctx.fillStyle = 'rgba(92, 124, 250, 0.16)';
-                    ctx.beginPath();
-                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                  } else if (lensMode === 'PHOTOFUSION') {
-                    ctx.fillStyle = 'rgba(15, 23, 42, 0.52)';
-                    ctx.beginPath();
-                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                  }
-                  ctx.restore();
-                } else {
-                  // User's Left profile is visible (head turned to user's right)
-                  const vecX = smooth.leftEarX - lHingeX;
-                  const vecY = smooth.leftEarY - lHingeY;
-                  const span = Math.hypot(vecX, vecY);
-                  const armAngle = Math.atan2(vecY, vecX);
-                  const sideWidth = Math.max(span * 1.15, smooth.width * 0.70) * adminSideScale * userScaleOffset;
-                  const sideHeight = sideWidth / sideAspect;
-
-                  ctx.save();
-                  ctx.globalAlpha = sideAlpha;
-                  ctx.translate(lHingeX, lHingeY);
-                  ctx.rotate(armAngle);
-                  const drawX = -adminSideAnchorX * sideWidth;
-                  const drawY = -adminSideAnchorY * sideHeight;
-                  ctx.drawImage(sideImg, drawX, drawY, sideWidth, sideHeight);
-
-                  // Side lens coating shimmer
-                  if (lensMode === 'BLUEBLOCK') {
-                    ctx.fillStyle = 'rgba(92, 124, 250, 0.16)';
-                    ctx.beginPath();
-                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                  } else if (lensMode === 'PHOTOFUSION') {
-                    ctx.fillStyle = 'rgba(15, 23, 42, 0.52)';
-                    ctx.beginPath();
-                    ctx.ellipse(drawX + sideWidth * 0.12, drawY + sideHeight * 0.5, sideWidth * 0.09, sideHeight * 0.32, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                  }
-                  ctx.restore();
-                }
-              }
+              const yawCos = Math.max(0.48, Math.cos(smooth.yaw));
 
               // 2. Front Eyewear Frame (ALWAYS rendered with full opacity across the nose bridge and eyes)
               ctx.save();
@@ -1432,11 +1374,11 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
           )}
 
           {/* Product Asset Loading Badge */}
-          {(isAssetLoading || isSideAssetLoading) && !isLoadingModel && (
+          {isAssetLoading && !isLoadingModel && (
             <div className="absolute top-14 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-md border border-[#C6A15B]/40 rounded-full px-3 py-1 flex items-center gap-2 z-20 shadow-lg">
               <div className="h-3 w-3 border border-[#C6A15B] border-t-transparent rounded-full animate-spin" />
               <span className="text-[10px] text-white/90 font-mono">
-                {is3D ? 'Loading 3D glasses model...' : isAssetLoading ? 'Loading front frame asset...' : 'Loading side frame profile...'}
+                {is3D ? 'Loading 3D glasses model...' : 'Loading front frame asset...'}
               </span>
             </div>
           )}
@@ -1506,12 +1448,11 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                   <span className="text-[10px] text-[#C6A15B] font-bold">🕶️ 3D Model Active</span>
                   <span className="text-[9px] text-white/60 hidden sm:inline">(Front & Side 360° Tracking)</span>
                 </div>
-              ) : hasSideAsset ? (
-                <div className="bg-black/65 backdrop-blur-md border border-[#C6A15B]/40 rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-lg">
-                  <span className="text-[10px] text-[#C6A15B] font-bold">🕶️ Front + Side</span>
-                  <span className="text-[9px] text-white/60 hidden sm:inline">(Turn head for side profile)</span>
+              ) : (
+                <div className="bg-black/65 backdrop-blur-md border border-white/20 rounded-full px-2.5 py-1 flex items-center gap-1.5 shadow-lg">
+                  <span className="text-[10px] text-white/90 font-medium">👓 2D Front View</span>
                 </div>
-              ) : null}
+              )}
 
               {/* Pupillary Distance (IPD) HUD */}
               <div className="bg-black/65 backdrop-blur-md border border-white/10 rounded-full px-3 py-1 flex items-center gap-1.5 shadow-lg">
