@@ -341,6 +341,30 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   const detectedFaceShapeRef = useRef<string>('');
   const faceMatchScoreRef = useRef<number>(96);
 
+  // Camera hardware video frame delivery tracking
+  const rvfcIdRef = useRef<number | null>(null);
+  const hasNewCameraFrameRef = useRef<boolean>(false);
+
+  // Velocity tracking & predictive latency compensation (feed-forward)
+  const trackingVelocityRef = useRef({
+    vx: 0,
+    vy: 0,
+    vyaw: 0,
+    vroll: 0,
+    vpitch: 0,
+    lastX: 0,
+    lastY: 0,
+    lastYaw: 0,
+    lastRoll: 0,
+    lastPitch: 0,
+    lastTime: 0,
+    prevVx: 0,
+    prevVyaw: 0,
+    isReversingX: false,
+    isReversingYaw: false,
+    initialized: false
+  });
+
   // Cached Three.js lens meshes for zero-traversal 60 FPS rendering
   const threeLensMeshesRef = useRef<THREE.Mesh[]>([]);
   const effectiveAnchorRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.45 });
@@ -617,6 +641,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             model.position.z = -bridgeAnchor.z;
 
             const pivot = new THREE.Group();
+            pivot.rotation.order = 'YXZ';
             pivot.add(model);
 
             modelBoundingWidthRef.current = Math.max(0.001, size.x);
@@ -755,6 +780,14 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   // 2. Camera Stream Lifecycle Management with Adaptive Fallbacks
   // ============================================================================
   const stopCamera = useCallback(() => {
+    if (rvfcIdRef.current !== null && videoRef.current && 'cancelVideoFrameCallback' in videoRef.current) {
+      try {
+        (videoRef.current as any).cancelVideoFrameCallback(rvfcIdRef.current);
+      } catch {}
+      rvfcIdRef.current = null;
+    }
+    hasNewCameraFrameRef.current = false;
+    trackingVelocityRef.current.initialized = false;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
         try {
@@ -830,6 +863,17 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
         await videoRef.current.play();
         setIsCameraActive(true);
+
+        // Hardware video frame delivery hook via requestVideoFrameCallback (bypasses currentTime jitter)
+        if ('requestVideoFrameCallback' in videoRef.current) {
+          const handleVideoFrame = () => {
+            hasNewCameraFrameRef.current = true;
+            if (videoRef.current && 'requestVideoFrameCallback' in videoRef.current) {
+              rvfcIdRef.current = (videoRef.current as any).requestVideoFrameCallback(handleVideoFrame);
+            }
+          };
+          rvfcIdRef.current = (videoRef.current as any).requestVideoFrameCallback(handleVideoFrame);
+        }
       }
     } catch (err: any) {
       console.error('Camera initialization error:', err);
@@ -860,6 +904,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
       animFrameIdRef.current = null;
     }
     stopCamera();
+    trackingVelocityRef.current.initialized = false;
     setCapturedSnapshot(null);
     setVirtualTryOnProduct(null);
   }, [stopCamera, setVirtualTryOnProduct]);
@@ -999,9 +1044,11 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
         // 1. Decoupled Frame Processing: Only run inference when webcam provides a new frame
         const currentVideoTime = video.currentTime;
-        const isNewVideoFrame = currentVideoTime !== lastVideoTimeRef.current && currentVideoTime > 0;
+        const hasNewFrame = hasNewCameraFrameRef.current || (currentVideoTime !== lastVideoTimeRef.current && currentVideoTime > 0);
+        hasNewCameraFrameRef.current = false;
         const timeSinceDetection = now - lastDetectionTimeRef.current;
-        const shouldDetect = (isNewVideoFrame || timeSinceDetection >= 33) && !isDetectingRef.current;
+        // Run inference promptly on every newly delivered video frame (fallback to >=25ms for 30-40 FPS webcams)
+        const shouldDetect = (hasNewFrame || timeSinceDetection >= 25) && !isDetectingRef.current;
 
         if (landmarker && shouldDetect) {
           isDetectingRef.current = true;
@@ -1106,8 +1153,85 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 const aspect = frameAspectRef.current || 2.5;
                 const targetHeight = targetWidth / aspect;
 
-                const targetX = bridge.x * vidW;
-                const targetY = bridge.y * vidH + userYOffsetRef.current;
+                const rawTargetX = bridge.x * vidW;
+                const rawTargetY = bridge.y * vidH + userYOffsetRef.current;
+
+                // Real-time velocity tracking and direction-reversal detection
+                const vel = trackingVelocityRef.current;
+                if (!vel.initialized) {
+                  vel.vx = 0;
+                  vel.vy = 0;
+                  vel.vyaw = 0;
+                  vel.vroll = 0;
+                  vel.vpitch = 0;
+                  vel.lastX = rawTargetX;
+                  vel.lastY = rawTargetY;
+                  vel.lastYaw = targetYaw;
+                  vel.lastRoll = targetAngle;
+                  vel.lastPitch = targetPitch;
+                  vel.lastTime = now;
+                  vel.prevVx = 0;
+                  vel.prevVyaw = 0;
+                  vel.isReversingX = false;
+                  vel.isReversingYaw = false;
+                  vel.initialized = true;
+                } else {
+                  const detDt = Math.max(0.005, Math.min(0.1, (now - vel.lastTime) / 1000));
+                  const instVx = (rawTargetX - vel.lastX) / detDt;
+                  const instVy = (rawTargetY - vel.lastY) / detDt;
+                  const instVyaw = diffAngle(targetYaw, vel.lastYaw) / detDt;
+                  const instVroll = diffAngle(targetAngle, vel.lastRoll) / detDt;
+                  const instVpitch = diffAngle(targetPitch, vel.lastPitch) / detDt;
+
+                  // Detect rapid direction reversal (e.g. sharp left-right head turnaround)
+                  const isReversingX = (instVx * vel.prevVx < -3600) && (Math.abs(instVx) > 60);
+                  const isReversingYaw = (instVyaw * vel.prevVyaw < -0.04) && (Math.abs(instVyaw) > 0.2);
+
+                  vel.isReversingX = isReversingX;
+                  vel.isReversingYaw = isReversingYaw;
+
+                  if (isReversingX) {
+                    vel.vx = instVx; // Immediately clear previous momentum on turnaround
+                  } else {
+                    vel.vx += (instVx - vel.vx) * 0.70;
+                  }
+
+                  if (isReversingYaw) {
+                    vel.vyaw = instVyaw;
+                  } else {
+                    vel.vyaw += (instVyaw - vel.vyaw) * 0.70;
+                  }
+
+                  vel.vy += (instVy - vel.vy) * 0.70;
+                  vel.vroll += (instVroll - vel.vroll) * 0.70;
+                  vel.vpitch += (instVpitch - vel.vpitch) * 0.70;
+
+                  vel.prevVx = instVx;
+                  vel.prevVyaw = instVyaw;
+                  vel.lastX = rawTargetX;
+                  vel.lastY = rawTargetY;
+                  vel.lastYaw = targetYaw;
+                  vel.lastRoll = targetAngle;
+                  vel.lastPitch = targetPitch;
+                  vel.lastTime = now;
+                }
+
+                // Predictive Feed-Forward Latency Compensation:
+                // Pre-offsets the target by estimated ~28ms hardware capture & inference lag during fast movements.
+                // Drops to 0ms when stationary to guarantee exact nose bridge alignment without overshoot or jitter.
+                const speed = Math.hypot(vel.vx, vel.vy);
+                let leadTime = 0;
+                if (speed > 25 && !vel.isReversingX) {
+                  leadTime = Math.min(0.028, ((speed - 25) / 250) * 0.028);
+                }
+                const targetX = rawTargetX + vel.vx * leadTime;
+                const targetY = rawTargetY + vel.vy * leadTime;
+
+                let yawLead = 0;
+                if (Math.abs(vel.vyaw) > 0.15 && !vel.isReversingYaw) {
+                  yawLead = Math.min(0.024, ((Math.abs(vel.vyaw) - 0.15) / 1.0) * 0.024);
+                }
+                const finalTargetYaw = Math.max(-0.95, Math.min(0.95, targetYaw + vel.vyaw * yawLead));
 
                 targetPoseRef.current = {
                   x: targetX,
@@ -1115,7 +1239,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                   width: targetWidth,
                   height: targetHeight,
                   angle: targetAngle,
-                  yaw: targetYaw,
+                  yaw: finalTargetYaw,
                   pitch: targetPitch,
                   hasTarget: true
                 };
@@ -1129,6 +1253,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
               if (smooth.framesSinceDetection > 12) {
                 smooth.active = false;
                 targetPoseRef.current.hasTarget = false;
+                trackingVelocityRef.current.initialized = false;
                 if (isFaceTrackedRef.current) {
                   isFaceTrackedRef.current = false;
                   setIsFaceTracked(false);
@@ -1142,7 +1267,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
           }
         }
 
-        // 2. Smooth Lerp towards target pose (Adaptive Velocity-Responsive Delta-Time Filter)
+        // 2. Smooth Lerp towards target pose (Adaptive Velocity-Responsive Dual-Regime Filter)
         const smooth = smoothPoseRef.current;
         const target = targetPoseRef.current;
 
@@ -1157,33 +1282,58 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             smooth.pitch = target.pitch;
             smooth.active = true;
           } else {
-            // Position filter: calm noise suppression when still, immediate 0.92+ lock when moving
+            const vel = trackingVelocityRef.current;
+
+            // Position filter: calm noise suppression when still, instantaneous 0.98+ lock when moving or reversing
             const posDelta = Math.hypot(target.x - smooth.x, target.y - smooth.y);
-            const moveFactor = Math.min(1.0, Math.max(0, (posDelta - 1.2) / 10.0));
-            const basePosAlpha = 0.45 + moveFactor * 0.47;
+            let basePosAlpha: number;
+            if (vel.isReversingX || posDelta > 16.0) {
+              basePosAlpha = 0.98; // Instant lock on fast moves or turnaround
+            } else if (posDelta <= 1.0) {
+              basePosAlpha = 0.38; // Calm noise suppression at rest
+            } else {
+              const factor = (posDelta - 1.0) / 15.0;
+              basePosAlpha = 0.38 + factor * 0.54;
+            }
 
-            // Rotation filter: rock-solid when holding pose, instant 0.90+ response when turning head
+            // Rotation filter: rock-solid forward lock, instant 0.98+ response on head turns & reversals
             const yawDelta = Math.abs(diffAngle(target.yaw, smooth.yaw));
-            const turnFactor = Math.min(1.0, Math.max(0, (yawDelta - 0.01) / 0.04));
-            const baseRotAlpha = 0.45 + turnFactor * 0.45;
+            let baseRotAlpha: number;
+            if (vel.isReversingYaw || yawDelta > 0.05) {
+              baseRotAlpha = 0.98; // Instant rotation response
+            } else if (yawDelta <= 0.008) {
+              baseRotAlpha = 0.38; // Jitter suppression
+            } else {
+              const factor = (yawDelta - 0.008) / 0.042;
+              baseRotAlpha = 0.38 + factor * 0.54;
+            }
 
-            // Size filter: eliminates breathing/pulsing noise while smoothly adjusting for distance
+            // Roll & Pitch filter: responsive angular tracking
+            const rollDelta = Math.abs(diffAngle(target.angle, smooth.angle));
+            const baseRollAlpha = rollDelta > 0.05 ? 0.96 : (rollDelta <= 0.008 ? 0.38 : 0.38 + ((rollDelta - 0.008) / 0.042) * 0.52);
+
+            const pitchDelta = Math.abs(diffAngle(target.pitch, smooth.pitch));
+            const basePitchAlpha = pitchDelta > 0.05 ? 0.96 : (pitchDelta <= 0.008 ? 0.38 : 0.38 + ((pitchDelta - 0.008) / 0.042) * 0.52);
+
+            // Size filter: high stability to eliminate breathing/pulsing noise while moving
             const sizeDiff = Math.abs(target.width - smooth.width);
-            const sizeFactor = Math.min(1.0, Math.max(0, (sizeDiff - 2.0) / 12.0));
-            const baseSizeAlpha = 0.28 + sizeFactor * 0.52;
+            const sizeFactor = Math.min(1.0, Math.max(0, (sizeDiff - 1.5) / 10.0));
+            const baseSizeAlpha = 0.28 + sizeFactor * 0.42;
 
-            // Frame-rate invariant interpolation coefficients
-            const posAlpha = 1 - Math.pow(1 - basePosAlpha, timeFactor);
-            const rotAlpha = 1 - Math.pow(1 - baseRotAlpha, timeFactor);
-            const sizeAlpha = 1 - Math.pow(1 - baseSizeAlpha, timeFactor);
+            // Frame-rate invariant interpolation coefficients normalized to 60 FPS reference
+            const posAlpha = Math.min(0.999, Math.max(0.05, 1 - Math.pow(1 - basePosAlpha, timeFactor)));
+            const rotAlpha = Math.min(0.999, Math.max(0.05, 1 - Math.pow(1 - baseRotAlpha, timeFactor)));
+            const rollAlpha = Math.min(0.999, Math.max(0.05, 1 - Math.pow(1 - baseRollAlpha, timeFactor)));
+            const pitchAlpha = Math.min(0.999, Math.max(0.05, 1 - Math.pow(1 - basePitchAlpha, timeFactor)));
+            const sizeAlpha = Math.min(0.999, Math.max(0.05, 1 - Math.pow(1 - baseSizeAlpha, timeFactor)));
 
             smooth.x += (target.x - smooth.x) * posAlpha;
             smooth.y += (target.y - smooth.y) * posAlpha;
             smooth.width += (target.width - smooth.width) * sizeAlpha;
             smooth.height += (target.height - smooth.height) * sizeAlpha;
-            smooth.angle += diffAngle(target.angle, smooth.angle) * rotAlpha;
+            smooth.angle += diffAngle(target.angle, smooth.angle) * rollAlpha;
             smooth.yaw += diffAngle(target.yaw, smooth.yaw) * rotAlpha;
-            smooth.pitch += diffAngle(target.pitch, smooth.pitch) * rotAlpha;
+            smooth.pitch += diffAngle(target.pitch, smooth.pitch) * pitchAlpha;
           }
         }
 
