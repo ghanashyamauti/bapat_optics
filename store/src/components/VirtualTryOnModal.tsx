@@ -65,32 +65,38 @@ async function getOrInitLandmarker(onProgress?: (msg: string) => void): Promise<
       if (onProgress) onProgress('Calibrating 478 3D Facial Landmarks...');
 
       let landmarker: FaceLandmarker;
+      const localModelPath = '/models/face_landmarker.task';
+      const cdnModelPath = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+
+      const createLandmarker = async (path: string, delegate: 'GPU' | 'CPU') => {
+        return await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: path,
+            delegate: delegate,
+          },
+          runningMode: 'VIDEO',
+          numFaces: 1,
+          minFaceDetectionConfidence: 0.35,
+          minFacePresenceConfidence: 0.35,
+          minTrackingConfidence: 0.35,
+        });
+      };
+
       try {
-        landmarker = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: '/models/face_landmarker.task',
-            delegate: 'CPU',
-          },
-          runningMode: 'VIDEO',
-          numFaces: 1,
-          minFaceDetectionConfidence: 0.3,
-          minFacePresenceConfidence: 0.3,
-          minTrackingConfidence: 0.3,
-        });
-      } catch (localErr) {
-        console.warn('Local model fallback to remote CDN:', localErr);
-        landmarker = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath:
-              'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-            delegate: 'CPU',
-          },
-          runningMode: 'VIDEO',
-          numFaces: 1,
-          minFaceDetectionConfidence: 0.3,
-          minFacePresenceConfidence: 0.3,
-          minTrackingConfidence: 0.3,
-        });
+        // High-performance hardware acceleration via GPU delegate
+        landmarker = await createLandmarker(localModelPath, 'GPU');
+      } catch (gpuErr) {
+        console.warn('Local GPU delegate fallback to CPU:', gpuErr);
+        try {
+          landmarker = await createLandmarker(localModelPath, 'CPU');
+        } catch (localErr) {
+          console.warn('Local model fallback to CDN:', localErr);
+          try {
+            landmarker = await createLandmarker(cdnModelPath, 'GPU');
+          } catch {
+            landmarker = await createLandmarker(cdnModelPath, 'CPU');
+          }
+        }
       }
 
       cachedLandmarker = landmarker;
@@ -321,12 +327,75 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   const [isCapturing, setIsCapturing] = useState(false);
   const [capturedSnapshot, setCapturedSnapshot] = useState<string | null>(null);
 
-  // Tracking loop refs
+  // High-performance tracking loop refs
   const landmarkerInstanceRef = useRef<FaceLandmarker | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number>(0);
+  const lastFrameTimeRef = useRef<number>(0);
+  const lastVideoTimeRef = useRef<number>(-1);
+  const lastDetectionTimeRef = useRef<number>(0);
+  const isDetectingRef = useRef<boolean>(false);
+  const isFaceTrackedRef = useRef<boolean>(false);
+  const lastMetricsTimeRef = useRef<number>(0);
+  const detectedIpdMmRef = useRef<number>(63);
+  const detectedFaceShapeRef = useRef<string>('');
+  const faceMatchScoreRef = useRef<number>(96);
 
-  // Smooth lerp state (adaptive One-Euro style velocity responsive filtering)
+  // Cached Three.js lens meshes for zero-traversal 60 FPS rendering
+  const threeLensMeshesRef = useRef<THREE.Mesh[]>([]);
+  const effectiveAnchorRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.45 });
+
+  // Sync refs to avoid restarting renderLoop on user adjustment or re-renders
+  const userScaleOffsetRef = useRef(userScaleOffset);
+  const userYOffsetRef = useRef(userYOffset);
+  const lensModeRef = useRef(lensMode);
+  const activeProductRef = useRef(activeProduct);
+  const is3DRef = useRef(is3D);
+
+  useEffect(() => { userScaleOffsetRef.current = userScaleOffset; }, [userScaleOffset]);
+  useEffect(() => { userYOffsetRef.current = userYOffset; }, [userYOffset]);
+  useEffect(() => { lensModeRef.current = lensMode; }, [lensMode]);
+  useEffect(() => { activeProductRef.current = activeProduct; }, [activeProduct]);
+  useEffect(() => { is3DRef.current = is3D; }, [is3D]);
+
+  // Pre-allocated Three.js lens coating configurations
+  const THREE_LENS_CONFIG = useMemo(() => ({
+    BLUEBLOCK: { color: new THREE.Color(0x99bbff), opacity: 0.85 },
+    PHOTOFUSION: { color: new THREE.Color(0x222233), opacity: 0.9 },
+    CLEAR: { color: new THREE.Color(0xffffff), opacity: 0.65 },
+  }), []);
+
+  const apply3DLensMode = useCallback((mode: LensMode) => {
+    const conf = THREE_LENS_CONFIG[mode] || THREE_LENS_CONFIG.CLEAR;
+    threeLensMeshesRef.current.forEach((mesh) => {
+      if (mesh.material) {
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((mat: any) => {
+          mat.color = conf.color;
+          mat.opacity = conf.opacity;
+          mat.needsUpdate = true;
+        });
+      }
+    });
+  }, [THREE_LENS_CONFIG]);
+
+  useEffect(() => {
+    apply3DLensMode(lensMode);
+  }, [lensMode, apply3DLensMode]);
+
+  // Target pose from latest landmark detection
+  const targetPoseRef = useRef({
+    x: 0,
+    y: 0,
+    width: 250,
+    height: 100,
+    angle: 0,
+    yaw: 0,
+    pitch: 0,
+    hasTarget: false
+  });
+
+  // Smooth lerp state (adaptive One-Euro style velocity responsive delta-time filtering)
   const smoothPoseRef = useRef({
     x: 0,
     y: 0,
@@ -553,6 +622,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             modelBoundingWidthRef.current = Math.max(0.001, size.x);
 
             // 4. Enhance materials & correct temple material assignments
+            const detectedLensMeshes: THREE.Mesh[] = [];
             model.traverse((child: any) => {
               if (child.isMesh && child.material) {
                 child.castShadow = false;
@@ -579,6 +649,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                   child.material.transparent = true;
                   child.material.depthWrite = false;
                   child.renderOrder = 2;
+                  detectedLensMeshes.push(child);
                 }
 
                 if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {
@@ -587,6 +658,9 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 }
               }
             });
+
+            threeLensMeshesRef.current = detectedLensMeshes;
+            apply3DLensMode(lensModeRef.current);
 
             if (threeModelGroupRef.current) {
               threeModelGroupRef.current.clear();
@@ -617,12 +691,28 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
     if (threeModelGroupRef.current) threeModelGroupRef.current.clear();
     loadedModelUrlRef.current = null;
 
+    const updateEffectiveAnchor = (crop: ProcessedAsset['cropBounds'] | null) => {
+      const rawAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
+      const rawAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
+      if (crop) {
+        const contentW = crop.maxX - crop.minX + 1;
+        const contentH = crop.maxY - crop.minY + 1;
+        effectiveAnchorRef.current = {
+          x: Math.max(0.05, Math.min(0.95, (rawAnchorX * crop.naturalW - crop.minX) / contentW)),
+          y: Math.max(0.05, Math.min(0.95, (rawAnchorY * crop.naturalH - crop.minY) / contentH)),
+        };
+      } else {
+        effectiveAnchorRef.current = { x: rawAnchorX, y: rawAnchorY };
+      }
+    };
+
     // --- Front View PNG ---
     if (processedImageCache.has(normalizedFrontUrl)) {
       const cached = processedImageCache.get(normalizedFrontUrl)!;
       frameImageRef.current = cached.canvas;
       frameAspectRef.current = cached.aspect;
       frameCropBoundsRef.current = cached.cropBounds || null;
+      updateEffectiveAnchor(cached.cropBounds || null);
       setAssetLoadError(null);
       setIsAssetLoading(false);
     } else {
@@ -642,6 +732,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
         frameImageRef.current = processed.canvas;
         frameAspectRef.current = processed.aspect;
         frameCropBoundsRef.current = processed.cropBounds || null;
+        updateEffectiveAnchor(processed.cropBounds || null);
         setAssetLoadError(null);
         setIsAssetLoading(false);
       };
@@ -810,6 +901,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   }, []);
 
   // Calculate Optician Metrics: Face Shape & Pupillary Distance (IPD)
+  // Throttled & guarded to eliminate 60 FPS re-renders
   const calculateFaceMetrics = (landmarks: any[], vidW: number, vidH: number) => {
     const rPupil = landmarks[RIGHT_PUPIL];
     const lPupil = landmarks[LEFT_PUPIL];
@@ -819,7 +911,10 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
       const dy = (lPupil.y - rPupil.y) * vidH;
       const pixelDist = Math.sqrt(dx * dx + dy * dy);
       const estimatedMm = Math.round(Math.min(72, Math.max(56, 63 + (pixelDist - 65) * 0.15)));
-      setDetectedIpdMm(estimatedMm);
+      if (Math.abs(estimatedMm - detectedIpdMmRef.current) >= 1) {
+        detectedIpdMmRef.current = estimatedMm;
+        setDetectedIpdMm(estimatedMm);
+      }
     }
 
     const forehead = landmarks[FOREHEAD_TOP];
@@ -836,24 +931,35 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
       const ratio = faceHeight / (faceWidth || 1);
 
+      let shape = '';
+      let score = 95;
       if (ratio > 1.45) {
-        setDetectedFaceShape('Oval Face (Optimal Frame Fit)');
-        setFaceMatchScore(98);
+        shape = 'Oval Face (Optimal Frame Fit)';
+        score = 98;
       } else if (ratio < 1.15) {
-        setDetectedFaceShape('Round Face (Angular Rims Suit Best)');
-        setFaceMatchScore(94);
+        shape = 'Round Face (Angular Rims Suit Best)';
+        score = 94;
       } else if (jawWidth / faceWidth > 0.85) {
-        setDetectedFaceShape('Square Face (Curved Rims Soften Features)');
-        setFaceMatchScore(96);
+        shape = 'Square Face (Curved Rims Soften Features)';
+        score = 96;
       } else {
-        setDetectedFaceShape('Heart / Diamond Face (Classic Proportions)');
-        setFaceMatchScore(95);
+        shape = 'Heart / Diamond Face (Classic Proportions)';
+        score = 95;
+      }
+
+      if (shape !== detectedFaceShapeRef.current) {
+        detectedFaceShapeRef.current = shape;
+        setDetectedFaceShape(shape);
+      }
+      if (score !== faceMatchScoreRef.current) {
+        faceMatchScoreRef.current = score;
+        setFaceMatchScore(score);
       }
     }
   };
 
   // ============================================================================
-  // 4. Real-Time 60 FPS Face Tracking & Glasses Render Loop
+  // 4. Real-Time 60 FPS Decoupled Face Tracking & Glasses Render Loop
   // ============================================================================
   useEffect(() => {
     if (isLoadingModel || cameraError) return;
@@ -877,304 +983,302 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
       ) {
         const vidW = video.videoWidth;
         const vidH = video.videoHeight;
+        const now = performance.now();
 
-        // Synchronize internal canvas resolution with video dimensions
+        // Synchronize internal 2D canvas resolution only when changed
         if (canvas.width !== vidW || canvas.height !== vidH) {
           canvas.width = vidW;
           canvas.height = vidH;
         }
 
+        // Precise delta-time calculation normalized to 60 FPS reference (dt = 0.01667s)
+        const lastFrameTime = lastFrameTimeRef.current || now;
+        const dt = Math.min(0.08, Math.max(0.001, (now - lastFrameTime) / 1000));
+        lastFrameTimeRef.current = now;
+        const timeFactor = dt / 0.016667;
+
+        // 1. Decoupled Frame Processing: Only run inference when webcam provides a new frame
+        const currentVideoTime = video.currentTime;
+        const isNewVideoFrame = currentVideoTime !== lastVideoTimeRef.current && currentVideoTime > 0;
+        const timeSinceDetection = now - lastDetectionTimeRef.current;
+        const shouldDetect = (isNewVideoFrame || timeSinceDetection >= 33) && !isDetectingRef.current;
+
+        if (landmarker && shouldDetect) {
+          isDetectingRef.current = true;
+          lastVideoTimeRef.current = currentVideoTime;
+          lastDetectionTimeRef.current = now;
+
+          try {
+            let detectionTimestamp = now;
+            if (detectionTimestamp <= lastTimestampRef.current) {
+              detectionTimestamp = lastTimestampRef.current + 1;
+            }
+            lastTimestampRef.current = detectionTimestamp;
+
+            const detections = landmarker.detectForVideo(video, detectionTimestamp);
+
+            if (detections.faceLandmarks && detections.faceLandmarks.length > 0) {
+              const landmarks = detections.faceLandmarks[0];
+
+              // Mark tracked without triggering duplicate React state re-renders
+              if (!isFaceTrackedRef.current) {
+                isFaceTrackedRef.current = true;
+                setIsFaceTracked(true);
+              }
+
+              // Throttle AI optical metrics calculation (every 600ms)
+              if (now - lastMetricsTimeRef.current > 600) {
+                lastMetricsTimeRef.current = now;
+                calculateFaceMetrics(landmarks, vidW, vidH);
+              }
+
+              // Stable cranial landmarks
+              const bridge = landmarks[NOSE_BRIDGE] || landmarks[NOSE_MID];
+              const lEye = landmarks[LEFT_EYE_OUTER];
+              const rEye = landmarks[RIGHT_EYE_OUTER];
+              const lTemple = landmarks[LEFT_TEMPLE];
+              const rTemple = landmarks[RIGHT_TEMPLE];
+              const lPupil = landmarks[LEFT_PUPIL];
+              const rPupil = landmarks[RIGHT_PUPIL];
+
+              if (bridge && lEye && rEye) {
+                // Eye span distance in 3D (rotation-invariant Euclidean distance)
+                const eyeDx = (lEye.x - rEye.x) * vidW;
+                const eyeDy = (lEye.y - rEye.y) * vidH;
+                const eyeDz = ((lEye.z ?? 0) - (rEye.z ?? 0)) * vidW;
+                const eyeSpan = Math.sqrt(eyeDx * eyeDx + eyeDy * eyeDy + eyeDz * eyeDz);
+
+                // Pupillary distance in 3D
+                let pupilDist = 0;
+                if (lPupil && rPupil) {
+                  const pDx = (lPupil.x - rPupil.x) * vidW;
+                  const pDy = (lPupil.y - rPupil.y) * vidH;
+                  const pDz = ((lPupil.z ?? 0) - (rPupil.z ?? 0)) * vidW;
+                  pupilDist = Math.sqrt(pDx * pDx + pDy * pDy + pDz * pDz);
+                }
+
+                // Temple / zygomatic head width at eye level in 3D
+                let templeDist = 0;
+                if (lTemple && rTemple) {
+                  const tDx = (lTemple.x - rTemple.x) * vidW;
+                  const tDy = (lTemple.y - rTemple.y) * vidH;
+                  const tDz = ((lTemple.z ?? 0) - (rTemple.z ?? 0)) * vidW;
+                  templeDist = Math.sqrt(tDx * tDx + tDy * tDy + tDz * tDz);
+                }
+
+                // 1. Head Yaw (horizontal rotation in XZ plane)
+                const eyeYaw = Math.atan2(eyeDz, eyeDx);
+                const dL = Math.max(1, (lEye.x - bridge.x) * vidW);
+                const dR = Math.max(1, (bridge.x - rEye.x) * vidW);
+                const asymYaw = Math.atan2((dR - dL) * 1.8, dR + dL);
+                const rawTargetYaw = eyeYaw * 0.60 + asymYaw * 0.40;
+                const targetYaw = Math.max(-0.95, Math.min(0.95, rawTargetYaw));
+
+                // 2. Head Roll (in-plane tilt in XY plane)
+                const targetAngle = Math.atan2(eyeDy, eyeDx);
+
+                // 3. Head Pitch (sagittal nod in YZ plane)
+                const forehead = landmarks[FOREHEAD_TOP];
+                const chin = landmarks[CHIN_BOTTOM];
+                let targetPitch = 0;
+                if (forehead && chin) {
+                  const fDy = (chin.y - forehead.y) * vidH;
+                  const fDz = ((chin.z ?? 0) - (forehead.z ?? 0)) * vidW;
+                  targetPitch = Math.max(-0.65, Math.min(0.65, Math.atan2(fDz, Math.max(10, fDy))));
+                }
+
+                // Natural frame sizing (3D rotation-invariant)
+                let naturalFrameWidth: number;
+                if (pupilDist > 15 && templeDist > 20) {
+                  const wPupils = pupilDist * 2.18;
+                  const wTemples = templeDist * 1.02;
+                  const wOuterEyes = eyeSpan * 1.44;
+                  naturalFrameWidth = (wPupils * 0.40) + (wTemples * 0.30) + (wOuterEyes * 0.30);
+                } else if (pupilDist > 15) {
+                  naturalFrameWidth = (pupilDist * 2.18 * 0.60) + (eyeSpan * 1.44 * 0.40);
+                } else {
+                  naturalFrameWidth = eyeSpan * 1.44;
+                }
+
+                const currentProduct = activeProductRef.current;
+                const adminScale = currentProduct?.tryon_scale ?? 1.0;
+                const targetWidth = naturalFrameWidth * adminScale * userScaleOffsetRef.current;
+                const aspect = frameAspectRef.current || 2.5;
+                const targetHeight = targetWidth / aspect;
+
+                const targetX = bridge.x * vidW;
+                const targetY = bridge.y * vidH + userYOffsetRef.current;
+
+                targetPoseRef.current = {
+                  x: targetX,
+                  y: targetY,
+                  width: targetWidth,
+                  height: targetHeight,
+                  angle: targetAngle,
+                  yaw: targetYaw,
+                  pitch: targetPitch,
+                  hasTarget: true
+                };
+
+                smoothPoseRef.current.framesSinceDetection = 0;
+              }
+            } else {
+              // No face in current frame
+              const smooth = smoothPoseRef.current;
+              smooth.framesSinceDetection++;
+              if (smooth.framesSinceDetection > 12) {
+                smooth.active = false;
+                targetPoseRef.current.hasTarget = false;
+                if (isFaceTrackedRef.current) {
+                  isFaceTrackedRef.current = false;
+                  setIsFaceTracked(false);
+                }
+              }
+            }
+          } catch (detectErr) {
+            console.warn('Face landmarking warning:', detectErr);
+          } finally {
+            isDetectingRef.current = false;
+          }
+        }
+
+        // 2. Smooth Lerp towards target pose (Adaptive Velocity-Responsive Delta-Time Filter)
+        const smooth = smoothPoseRef.current;
+        const target = targetPoseRef.current;
+
+        if (target.hasTarget) {
+          if (!smooth.active) {
+            smooth.x = target.x;
+            smooth.y = target.y;
+            smooth.width = target.width;
+            smooth.height = target.height;
+            smooth.angle = target.angle;
+            smooth.yaw = target.yaw;
+            smooth.pitch = target.pitch;
+            smooth.active = true;
+          } else {
+            // Position filter: calm noise suppression when still, immediate 0.92+ lock when moving
+            const posDelta = Math.hypot(target.x - smooth.x, target.y - smooth.y);
+            const moveFactor = Math.min(1.0, Math.max(0, (posDelta - 1.2) / 10.0));
+            const basePosAlpha = 0.45 + moveFactor * 0.47;
+
+            // Rotation filter: rock-solid when holding pose, instant 0.90+ response when turning head
+            const yawDelta = Math.abs(diffAngle(target.yaw, smooth.yaw));
+            const turnFactor = Math.min(1.0, Math.max(0, (yawDelta - 0.01) / 0.04));
+            const baseRotAlpha = 0.45 + turnFactor * 0.45;
+
+            // Size filter: eliminates breathing/pulsing noise while smoothly adjusting for distance
+            const sizeDiff = Math.abs(target.width - smooth.width);
+            const sizeFactor = Math.min(1.0, Math.max(0, (sizeDiff - 2.0) / 12.0));
+            const baseSizeAlpha = 0.28 + sizeFactor * 0.52;
+
+            // Frame-rate invariant interpolation coefficients
+            const posAlpha = 1 - Math.pow(1 - basePosAlpha, timeFactor);
+            const rotAlpha = 1 - Math.pow(1 - baseRotAlpha, timeFactor);
+            const sizeAlpha = 1 - Math.pow(1 - baseSizeAlpha, timeFactor);
+
+            smooth.x += (target.x - smooth.x) * posAlpha;
+            smooth.y += (target.y - smooth.y) * posAlpha;
+            smooth.width += (target.width - smooth.width) * sizeAlpha;
+            smooth.height += (target.height - smooth.height) * sizeAlpha;
+            smooth.angle += diffAngle(target.angle, smooth.angle) * rotAlpha;
+            smooth.yaw += diffAngle(target.yaw, smooth.yaw) * rotAlpha;
+            smooth.pitch += diffAngle(target.pitch, smooth.pitch) * rotAlpha;
+          }
+        }
+
+        // 3. Render Pipeline (Three.js WebGL or 2D Canvas)
         const ctx = canvas.getContext('2d');
         if (ctx) {
           ctx.clearRect(0, 0, vidW, vidH);
+        }
 
-          let detectedThisFrame = false;
+        const threeCanvas = threeCanvasRef.current;
+        const renderer = threeRendererRef.current;
+        const camera = threeCameraRef.current;
+        const scene = threeSceneRef.current;
+        const modelGroup = threeModelGroupRef.current;
 
-          if (landmarker) {
-            try {
-              let now = performance.now();
-              if (now <= lastTimestampRef.current) {
-                now = lastTimestampRef.current + 1;
-              }
-              lastTimestampRef.current = now;
+        if (threeCanvas && renderer && camera) {
+          if (threeCanvas.width !== vidW || threeCanvas.height !== vidH) {
+            threeCanvas.width = vidW;
+            threeCanvas.height = vidH;
+            renderer.setSize(vidW, vidH, false);
+            const fovRad = (camera.fov * Math.PI) / 180;
+            const cameraZ = (vidH / 2) / Math.tan(fovRad / 2);
+            camera.aspect = vidW / vidH;
+            camera.position.set(0, 0, cameraZ);
+            camera.lookAt(0, 0, 0);
+            camera.updateProjectionMatrix();
+          }
+        }
 
-              const detections = landmarker.detectForVideo(video, now);
+        const currentIs3D = is3DRef.current;
 
-              if (detections.faceLandmarks && detections.faceLandmarks.length > 0) {
-                detectedThisFrame = true;
-                const landmarks = detections.faceLandmarks[0];
-                setIsFaceTracked(true);
+        if (currentIs3D) {
+          if (smooth.active && modelGroup && modelGroup.children.length > 0 && renderer && scene && camera) {
+            const pivot = modelGroup.children[0] as THREE.Group;
+            const currentProduct = activeProductRef.current;
+            const adminAnchorX = currentProduct?.tryon_bridge_x ?? 0.5;
+            const adminAnchorY = currentProduct?.tryon_bridge_y ?? 0.45;
 
-                calculateFaceMetrics(landmarks, vidW, vidH);
+            // Scale glasses model so model outer bounding width exactly matches facial frame width
+            const desiredWidth = smooth.width;
+            const baseScale = desiredWidth / (modelBoundingWidthRef.current || 1.0);
+            pivot.scale.set(baseScale, baseScale, baseScale);
 
-                // Stable cranial landmarks
-                const bridge = landmarks[NOSE_BRIDGE] || landmarks[NOSE_MID];
-                const lEye = landmarks[LEFT_EYE_OUTER];
-                const rEye = landmarks[RIGHT_EYE_OUTER];
-                const lTemple = landmarks[LEFT_TEMPLE];
-                const rTemple = landmarks[RIGHT_TEMPLE];
-                const lPupil = landmarks[LEFT_PUPIL];
-                const rPupil = landmarks[RIGHT_PUPIL];
-                const rEarTragus = landmarks[RIGHT_EAR_TRAGUS];
-                const lEarTragus = landmarks[LEFT_EAR_TRAGUS];
-                const rEarTop = landmarks[RIGHT_EAR_TOP];
-                const lEarTop = landmarks[LEFT_EAR_TOP];
+            // Position at nose bridge (screen center = Three.js origin)
+            const posX = (smooth.x - vidW / 2) + (0.5 - adminAnchorX) * smooth.width;
+            const posY = -(smooth.y - vidH / 2) + (adminAnchorY - 0.45) * smooth.height;
+            pivot.position.set(posX, posY, 0);
 
-                if (bridge && lEye && rEye) {
-                  // Eye span distance in 3D (rotation-invariant Euclidean distance)
-                  const eyeDx = (lEye.x - rEye.x) * vidW;
-                  const eyeDy = (lEye.y - rEye.y) * vidH;
-                  const eyeDz = ((lEye.z ?? 0) - (rEye.z ?? 0)) * vidW;
-                  const eyeSpan = Math.hypot(eyeDx, eyeDy, eyeDz);
+            // 3D rotations for roll, yaw, pitch with cranial YXZ rotation order (1:1 head-pose tracking)
+            pivot.rotation.z = -smooth.angle;
+            pivot.rotation.y = smooth.yaw;
+            pivot.rotation.x = smooth.pitch;
 
-                  // Pupillary distance in 3D
-                  const pDx = lPupil && rPupil ? (lPupil.x - rPupil.x) * vidW : 0;
-                  const pDy = lPupil && rPupil ? (lPupil.y - rPupil.y) * vidH : 0;
-                  const pDz = lPupil && rPupil ? ((lPupil.z ?? 0) - (rPupil.z ?? 0)) * vidW : 0;
-                  const pupilDist = lPupil && rPupil ? Math.hypot(pDx, pDy, pDz) : 0;
-
-                  // Temple / zygomatic head width at eye level in 3D
-                  const tDx = lTemple && rTemple ? (lTemple.x - rTemple.x) * vidW : 0;
-                  const tDy = lTemple && rTemple ? (lTemple.y - rTemple.y) * vidH : 0;
-                  const tDz = lTemple && rTemple ? ((lTemple.z ?? 0) - (rTemple.z ?? 0)) * vidW : 0;
-                  const templeDist = lTemple && rTemple ? Math.hypot(tDx, tDy, tDz) : 0;
-
-                  // 1. Precise Head Yaw (horizontal rotation in XZ plane)
-                  const eyeYaw = Math.atan2(eyeDz, eyeDx);
-
-                  // Nasal bridge-to-eye horizontal asymmetry (stable cranial anchor):
-                  // In frontal view, bridge sits halfway between pupils/eyes (dL ≈ dR).
-                  // When head turns, bridge shifts towards the near eye proportionally to tan(yaw).
-                  const dL = Math.max(1, (lEye.x - bridge.x) * vidW);
-                  const dR = Math.max(1, (bridge.x - rEye.x) * vidW);
-                  const asymYaw = Math.atan2((dR - dL) * 1.8, dR + dL);
-
-                  // Fuse 3D eye depth vector with 2D nasal asymmetry for drift-free yaw tracking
-                  const rawTargetYaw = eyeYaw * 0.60 + asymYaw * 0.40;
-                  const targetYaw = Math.max(-0.95, Math.min(0.95, rawTargetYaw));
-
-                  // 2. Precise Head Roll (in-plane tilt in XY plane)
-                  const targetAngle = Math.atan2(eyeDy, eyeDx);
-
-                  // 3. Precise Head Pitch (sagittal nod in YZ plane)
-                  const forehead = landmarks[FOREHEAD_TOP];
-                  const chin = landmarks[CHIN_BOTTOM];
-                  let targetPitch = 0;
-                  if (forehead && chin) {
-                    const fDy = (chin.y - forehead.y) * vidH;
-                    const fDz = ((chin.z ?? 0) - (forehead.z ?? 0)) * vidW;
-                    targetPitch = Math.max(-0.65, Math.min(0.65, Math.atan2(fDz, Math.max(10, fDy))));
-                  }
-
-                  // Natural anthropometric frame sizing (3D rotation-invariant):
-                  // Standard adult frame width (138mm) ≈ 2.18x IPD (63mm) ≈ 1.44x outer eye span (95mm) ≈ 1.02x temple width (135mm).
-                  let naturalFrameWidth: number;
-                  if (pupilDist > 15 && templeDist > 20) {
-                    const wPupils = pupilDist * 2.18;
-                    const wTemples = templeDist * 1.02;
-                    const wOuterEyes = eyeSpan * 1.44;
-                    naturalFrameWidth = (wPupils * 0.40) + (wTemples * 0.30) + (wOuterEyes * 0.30);
-                  } else if (pupilDist > 15) {
-                    naturalFrameWidth = (pupilDist * 2.18 * 0.60) + (eyeSpan * 1.44 * 0.40);
-                  } else {
-                    naturalFrameWidth = eyeSpan * 1.44;
-                  }
-
-                  // Apply admin calibration scale and user manual adjustment slider offset
-                  // In 3D space, natural 3D foreshortening is handled by Three.js perspective camera
-                  const adminScale = activeProduct.tryon_scale ?? 1.0;
-                  const targetWidth = naturalFrameWidth * adminScale * userScaleOffset;
-                  const aspect = frameAspectRef.current || 2.5;
-                  const targetHeight = targetWidth / aspect;
-
-                  // Bridge anchor: centered horizontally on nasal bridge, vertically aligned to bridge + manual offset
-                  const targetX = bridge.x * vidW;
-                  const targetY = bridge.y * vidH + userYOffset;
-                  // Adaptive velocity-responsive smoothing
-                  const smooth = smoothPoseRef.current;
-                  if (!smooth.active) {
-                    smooth.x = targetX;
-                    smooth.y = targetY;
-                    smooth.width = targetWidth;
-                    smooth.height = targetHeight;
-                    smooth.angle = targetAngle;
-                    smooth.yaw = targetYaw;
-                    smooth.pitch = targetPitch;
-                    smooth.active = true;
-                  } else {
-                    // Velocity-adaptive smoothing: responsive during fast movement, stable and jitter-free when resting
-                    const posDelta = Math.hypot(targetX - smooth.x, targetY - smooth.y);
-                    const posAlpha = Math.min(0.75, Math.max(0.38, (posDelta / 30) * 0.4 + 0.38));
-
-                    const yawDelta = Math.abs(diffAngle(targetYaw, smooth.yaw));
-                    const rotAlpha = Math.min(0.75, Math.max(0.35, yawDelta * 2.0 + 0.35));
-
-                    const sizeAlpha = 0.25;
-
-                    smooth.x += (targetX - smooth.x) * posAlpha;
-                    smooth.y += (targetY - smooth.y) * posAlpha;
-                    smooth.width += (targetWidth - smooth.width) * sizeAlpha;
-                    smooth.height += (targetHeight - smooth.height) * sizeAlpha;
-                    smooth.angle += diffAngle(targetAngle, smooth.angle) * rotAlpha;
-                    smooth.yaw += diffAngle(targetYaw, smooth.yaw) * rotAlpha;
-                    smooth.pitch += diffAngle(targetPitch, smooth.pitch) * rotAlpha;
-                  }
-
-                  smooth.framesSinceDetection = 0;
-                }
-              }
-            } catch (detectErr) {
-              console.warn('Face landmarking warning:', detectErr);
+            pivot.visible = true;
+            renderer.render(scene, camera);
+          } else if (renderer && scene && camera) {
+            if (modelGroup && modelGroup.children[0]) {
+              (modelGroup.children[0] as THREE.Group).visible = false;
             }
+            renderer.clear();
+          }
+        } else {
+          // Clear Three.js WebGL canvas when rendering 2D PNG
+          if (renderer && scene && camera) {
+            renderer.clear();
           }
 
-          const smooth = smoothPoseRef.current;
+          // 2D Canvas rendering
+          if (smooth.active && frameImageRef.current && ctx) {
+            const frameImg = frameImageRef.current;
+            const { x: adminAnchorX, y: adminAnchorY } = effectiveAnchorRef.current;
+            const yawCos = Math.max(0.48, Math.cos(smooth.yaw));
 
-          if (!detectedThisFrame) {
-            smooth.framesSinceDetection++;
-            if (smooth.framesSinceDetection > 15) {
-              smooth.active = false;
-              setIsFaceTracked(false);
-            }
-          }
+            ctx.save();
+            ctx.globalAlpha = 1.0;
+            ctx.translate(smooth.x, smooth.y);
+            ctx.rotate(smooth.angle);
+            ctx.scale(yawCos, 1.0);
 
-          // Synchronize Three.js Renderer Resolution & Camera Matrix
-          const threeCanvas = threeCanvasRef.current;
-          const renderer = threeRendererRef.current;
-          const camera = threeCameraRef.current;
-          const scene = threeSceneRef.current;
-          const modelGroup = threeModelGroupRef.current;
+            // Position frame using Pre-calculated Bridge Anchor Point
+            const drawX = -adminAnchorX * smooth.width;
+            const drawY = -adminAnchorY * smooth.height;
 
-          if (threeCanvas && renderer && camera) {
-            if (threeCanvas.width !== vidW || threeCanvas.height !== vidH) {
-              threeCanvas.width = vidW;
-              threeCanvas.height = vidH;
-              renderer.setSize(vidW, vidH, false);
-              const fovRad = (camera.fov * Math.PI) / 180;
-              const cameraZ = (vidH / 2) / Math.tan(fovRad / 2);
-              camera.aspect = vidW / vidH;
-              camera.position.set(0, 0, cameraZ);
-              camera.lookAt(0, 0, 0);
-              camera.updateProjectionMatrix();
-            }
-          }
+            ctx.drawImage(frameImg, drawX, drawY, smooth.width, smooth.height);
 
-          // ====================================================================
-          // A. 3D Glasses Model Rendering Loop (Three.js WebGL)
-          // ====================================================================
-          if (is3D) {
-            if (smooth.active && modelGroup && modelGroup.children.length > 0 && renderer && scene && camera) {
-              const pivot = modelGroup.children[0] as THREE.Group;
-              const adminScale = activeProduct.tryon_scale ?? 1.0;
-              const adminAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
-              const adminAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
-
-              // Scale glasses model so model outer bounding width exactly matches facial frame width
-              const desiredWidth = smooth.width;
-              const baseScale = desiredWidth / (modelBoundingWidthRef.current || 1.0);
-              pivot.scale.set(baseScale, baseScale, baseScale);
-
-              // Position at nose bridge (screen center = Three.js origin)
-              const posX = (smooth.x - vidW / 2) + (0.5 - adminAnchorX) * smooth.width;
-              const posY = -(smooth.y - vidH / 2) + (adminAnchorY - 0.45) * smooth.height;
-              pivot.position.set(posX, posY, 0);
-
-              // 3D rotations for roll, yaw, pitch with cranial YXZ rotation order (1:1 head-pose tracking)
-              pivot.rotation.order = 'YXZ';
-              pivot.rotation.z = -smooth.angle;
-              pivot.rotation.y = smooth.yaw;
-              pivot.rotation.x = smooth.pitch;
-
-              // Lens tint coating effects
-              pivot.traverse((child: any) => {
-                if (child.isMesh && child.material) {
-                  const names = [
-                    child.name || '',
-                    child.parent?.name || '',
-                    child.material?.name || ''
-                  ].join(' ').toLowerCase();
-                  if (names.includes('lens') || names.includes('glass') || names.includes('lente') || names.includes('verre') || names.includes('cristal')) {
-                    child.material.transparent = true;
-                    child.material.depthWrite = false;
-                    child.renderOrder = 2;
-                    if (lensMode === 'BLUEBLOCK') {
-                      child.material.color = new THREE.Color(0x99bbff);
-                      child.material.opacity = 0.85;
-                    } else if (lensMode === 'PHOTOFUSION') {
-                      child.material.color = new THREE.Color(0x222233);
-                      child.material.opacity = 0.9;
-                    } else {
-                      child.material.color = new THREE.Color(0xffffff);
-                      child.material.opacity = 0.65;
-                    }
-                  }
-                }
-              });
-
-              pivot.visible = true;
-              renderer.render(scene, camera);
-            } else if (renderer && scene && camera) {
-              if (modelGroup && modelGroup.children[0]) {
-                (modelGroup.children[0] as THREE.Group).visible = false;
-              }
-              renderer.clear();
-            }
-          } else {
-            // Clear Three.js WebGL canvas when rendering 2D PNG
-            if (renderer && scene && camera) {
-              renderer.clear();
-            }
-
-            // ====================================================================
-            // B. 2D Eyewear Frame Rendering Loop (Dual-View Canvas)
-            // ====================================================================
-            if (smooth.active && frameImageRef.current) {
-              const frameImg = frameImageRef.current;
-
-              // Map bridge calibration coordinates from raw uploaded asset space to tight cropped frame space
-              const rawAnchorX = activeProduct.tryon_bridge_x ?? 0.5;
-              const rawAnchorY = activeProduct.tryon_bridge_y ?? 0.45;
-              let adminAnchorX = rawAnchorX;
-              let adminAnchorY = rawAnchorY;
-
-              const crop = frameCropBoundsRef.current;
-              if (crop) {
-                const contentW = crop.maxX - crop.minX + 1;
-                const contentH = crop.maxY - crop.minY + 1;
-                adminAnchorX = Math.max(0.05, Math.min(0.95, (rawAnchorX * crop.naturalW - crop.minX) / contentW));
-                adminAnchorY = Math.max(0.05, Math.min(0.95, (rawAnchorY * crop.naturalH - crop.minY) / contentH));
-              }
-
-              // Perspective foreshortening factor for the front frame as head turns
-              const yawCos = Math.max(0.48, Math.cos(smooth.yaw));
-
-              // 2. Front Eyewear Frame (ALWAYS rendered with full opacity across the nose bridge and eyes)
-              ctx.save();
-              ctx.globalAlpha = 1.0;
-              ctx.translate(smooth.x, smooth.y);
-              ctx.rotate(smooth.angle);
-              ctx.scale(yawCos, 1.0);
-
-              // Position frame using Admin-Calibrated Bridge Anchor Point
-              const drawX = -adminAnchorX * smooth.width;
-              const drawY = -adminAnchorY * smooth.height;
-
-              ctx.drawImage(
-                frameImg,
-                drawX,
-                drawY,
-                smooth.width,
-                smooth.height
-              );
-
-              // 4. ZEISS Lens Coating Effects (Clear, BlueBlock, PhotoFusion)
+            // ZEISS Lens Coating Effects (Clear, BlueBlock, PhotoFusion)
+            const currentLensMode = lensModeRef.current;
+            if (currentLensMode === 'BLUEBLOCK' || currentLensMode === 'PHOTOFUSION') {
               const lensCenterY = drawY + smooth.height * 0.52;
               const leftLensCenterX = drawX + smooth.width * 0.27;
               const rightLensCenterX = drawX + smooth.width * 0.73;
               const lensRadiusX = smooth.width * 0.17;
               const lensRadiusY = smooth.height * 0.36;
 
-              if (lensMode === 'BLUEBLOCK') {
+              if (currentLensMode === 'BLUEBLOCK') {
                 ctx.fillStyle = 'rgba(92, 124, 250, 0.18)';
                 ctx.beginPath();
                 ctx.ellipse(leftLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
@@ -1187,7 +1291,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 ctx.arc(leftLensCenterX, lensCenterY - lensRadiusY * 0.25, lensRadiusX * 0.7, -0.9, -0.15);
                 ctx.arc(rightLensCenterX, lensCenterY - lensRadiusY * 0.25, lensRadiusX * 0.7, -0.9, -0.15);
                 ctx.stroke();
-              } else if (lensMode === 'PHOTOFUSION') {
+              } else if (currentLensMode === 'PHOTOFUSION') {
                 ctx.fillStyle = 'rgba(15, 23, 42, 0.58)';
                 ctx.beginPath();
                 ctx.ellipse(leftLensCenterX, lensCenterY, lensRadiusX, lensRadiusY, 0, 0, Math.PI * 2);
@@ -1201,9 +1305,9 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 ctx.arc(rightLensCenterX, lensCenterY - lensRadiusY * 0.3, lensRadiusX * 0.65, -0.8, -0.2);
                 ctx.stroke();
               }
-
-              ctx.restore();
             }
+
+            ctx.restore();
           }
         }
       }
@@ -1220,7 +1324,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
         animFrameIdRef.current = null;
       }
     };
-  }, [isLoadingModel, cameraError, activeProduct, userScaleOffset, userYOffset, lensMode, is3D]);
+  }, [isLoadingModel, cameraError]);
 
   // ============================================================================
   // 5. High-Resolution Snapshot Capture with Luxury Watermark
