@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, MessageCircle, ShoppingBag, Check, Sparkles, MapPin, Ruler, Zap, ShieldCheck, Share2 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { handleImageError, FALLBACK_EYEWEAR_IMAGE } from '../utils/imageFallback';
+import { isVirtualTryOnEligible, getProductTryOnUrl } from '../utils/tryOnEligibility';
 
 export const ProductDetailModal: React.FC = () => {
   const { 
@@ -278,12 +279,13 @@ export const ProductDetailModal: React.FC = () => {
                   </button>
 
                   {/* 3. Live 3D Virtual Try-On (For wearable frames, sunglasses, and meta glasses) */}
-                  {(product.category?.slug === 'spectacle-frames' || product.category?.slug === 'sunglasses' || product.category?.slug === 'meta' || product.category?.slug === 'kids') && !!product.tryon_image_url && (
+                  {isVirtualTryOnEligible(product) && (
                     <button
                       type="button"
                       onClick={() => {
                         setQuickViewProduct(null);
-                        setVirtualTryOnProduct(product);
+                        const tryOnUrl = getProductTryOnUrl(product);
+                        setVirtualTryOnProduct(tryOnUrl ? { ...product, tryon_image_url: tryOnUrl } : product);
                       }}
                       className="w-full flex items-center justify-center gap-2 bg-[#0A0A0A] border border-[#C6A15B] hover:bg-[#C6A15B] text-[#C6A15B] hover:text-[#0A0A0A] py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all shadow-md cursor-pointer group"
                     >

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
 import { Product } from '../types/store';
+import { isVirtualTryOnEligible, getProductTryOnUrl } from '../utils/tryOnEligibility';
 
 // ==============================================================================
 // Stable Facial Landmark Indices (MediaPipe FaceMesh 478 landmarks)
@@ -434,11 +435,12 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
 
   // Eyewear catalog for quick trial switcher carousel (wearable frames & sunglasses only)
   const eyewearCatalog = useMemo(() => {
-    return products.filter((p) => {
-      const slug = p.category?.slug;
-      const isEyewear = slug === 'spectacle-frames' || slug === 'sunglasses' || slug === 'meta' || slug === 'kids';
-      return isEyewear && !!p.tryon_image_url;
-    });
+    return products
+      .filter((p) => isVirtualTryOnEligible(p))
+      .map((p) => {
+        const tryOnUrl = getProductTryOnUrl(p);
+        return tryOnUrl && tryOnUrl !== p.tryon_image_url ? { ...p, tryon_image_url: tryOnUrl } : p;
+      });
   }, [products]);
 
   // Format currency helper
@@ -514,7 +516,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
   useEffect(() => {
     let isCancelled = false;
 
-    const rawFrontUrl = activeProduct.tryon_image_url;
+    const rawFrontUrl = activeProduct.tryon_image_url || getProductTryOnUrl(activeProduct);
     const normalizedFrontUrl = normalizeTryonUrl(rawFrontUrl);
     const productIs3D = is3DModelAsset(rawFrontUrl) || activeProduct.tryon_asset_type === '3d';
 
@@ -596,26 +598,26 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             }
 
             if (needsRotateY) {
-              // Rotate around Y so width aligns with X and temples align with -Z
+              // Rotate around Y so width aligns with X
               model.rotation.y = -Math.PI / 2;
               model.updateMatrixWorld(true);
+            }
 
-              // Verify whether temples extend backward along -Z towards ears or forward towards camera.
-              // In standard orientation, front frame is closer to +Z, and temples extend backward towards -Z.
-              const checkRef = frontMesh || lensMesh;
-              if (checkRef) {
-                const testBox = new THREE.Box3().setFromObject(model);
-                const testSize = testBox.getSize(new THREE.Vector3());
-                const refBox = new THREE.Box3().setFromObject(checkRef);
+            // Verify whether temples extend backward along -Z towards ears or forward towards camera.
+            // In standard orientation, front frame is closer to +Z, and temples extend backward towards -Z.
+            const checkRef = frontMesh || lensMesh;
+            if (checkRef) {
+              const testBox = new THREE.Box3().setFromObject(model);
+              const testSize = testBox.getSize(new THREE.Vector3());
+              const refBox = new THREE.Box3().setFromObject(checkRef);
 
-                const extendsForward = (testBox.max.z - refBox.max.z) > (testSize.z * 0.15);
-                const extendsBackward = (refBox.min.z - testBox.min.z) > (testSize.z * 0.15);
+              const extendsForward = (testBox.max.z - refBox.max.z) > (testSize.z * 0.15);
+              const extendsBackward = (refBox.min.z - testBox.min.z) > (testSize.z * 0.15);
 
-                // If temples extend forward (+Z) instead of backward (-Z), flip 180 degrees to +PI/2
-                if (extendsForward && !extendsBackward) {
-                  model.rotation.y = Math.PI / 2;
-                  model.updateMatrixWorld(true);
-                }
+              // If temples extend forward (+Z) instead of backward (-Z), flip 180 degrees around Y
+              if (extendsForward && !extendsBackward) {
+                model.rotation.y += Math.PI;
+                model.updateMatrixWorld(true);
               }
             }
 
@@ -643,6 +645,25 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             const pivot = new THREE.Group();
             pivot.rotation.order = 'YXZ';
             pivot.add(model);
+
+            // Anatomical head occluder (depth mask):
+            // Populates WebGL depth buffer with head volume behind the front frame (Z < 0).
+            // When user turns head, the near-side temple remains visible while the far-side temple
+            // is naturally occluded behind the skull depth buffer instead of showing through the face/lenses.
+            const headRadiusX = size.x * 0.41;
+            const headRadiusY = Math.max(size.y * 1.4, size.x * 0.55);
+            const headRadiusZ = Math.max(size.z * 0.65, size.x * 0.60);
+            const headGeo = new THREE.SphereGeometry(1, 32, 24);
+            headGeo.scale(headRadiusX, headRadiusY, headRadiusZ);
+            const headMat = new THREE.MeshBasicMaterial({
+              colorWrite: false, // 100% transparent to color buffer, video shows through
+              depthWrite: true,  // Writes head depth into WebGL Z-buffer
+            });
+            const headOccluder = new THREE.Mesh(headGeo, headMat);
+            headOccluder.name = '__vto_head_occluder__';
+            headOccluder.renderOrder = -1; // Render first to populate depth buffer
+            headOccluder.position.set(0, -size.y * 0.15, -size.x * 0.05 - headRadiusZ);
+            pivot.add(headOccluder);
 
             modelBoundingWidthRef.current = Math.max(0.001, size.x);
 
@@ -675,6 +696,10 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                   child.material.depthWrite = false;
                   child.renderOrder = 2;
                   detectedLensMeshes.push(child);
+                } else {
+                  child.renderOrder = 1;
+                  child.material.depthTest = true;
+                  child.material.depthWrite = true;
                 }
 
                 if (child.material.isMeshStandardMaterial || child.material.isMeshPhysicalMaterial) {

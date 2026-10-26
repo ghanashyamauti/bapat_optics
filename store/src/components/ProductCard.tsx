@@ -3,6 +3,7 @@ import { Eye, MessageCircle, ShoppingBag, Check, Zap, Sparkles, Share2, AlertCir
 import type { Product } from '../types/store';
 import { useStore } from '../context/StoreContext';
 import { handleImageError, FALLBACK_EYEWEAR_IMAGE } from '../utils/imageFallback';
+import { isVirtualTryOnEligible, getProductTryOnUrl } from '../utils/tryOnEligibility';
 
 export const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const { 
@@ -37,7 +38,8 @@ export const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
 
   const handleOpenVirtualTryOn = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setVirtualTryOnProduct(product);
+    const tryOnUrl = getProductTryOnUrl(product);
+    setVirtualTryOnProduct(tryOnUrl ? { ...product, tryon_image_url: tryOnUrl } : product);
   };
 
   const qtyInCart = getCartItemQuantity(product.id, 'FRAME_ONLY');
@@ -276,7 +278,7 @@ export const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
           )}
 
           {/* 3D Virtual Try-On Primary Experience Button (For wearable frames, sunglasses, and meta glasses) */}
-          {(product.category?.slug === 'spectacle-frames' || product.category?.slug === 'sunglasses' || product.category?.slug === 'meta' || product.category?.slug === 'kids') && !!product.tryon_image_url && (
+          {isVirtualTryOnEligible(product) && (
             <button
               type="button"
               onClick={handleOpenVirtualTryOn}
