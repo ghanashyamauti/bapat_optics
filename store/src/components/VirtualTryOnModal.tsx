@@ -642,28 +642,111 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             model.position.y = -bridgeAnchor.y;
             model.position.z = -bridgeAnchor.z;
 
+            // Model-specific temple ergonomics and alignment (Armani Exchange / model_4dd):
+            // In model_4dd, temples were modeled flat/horizontal (0 deg pantoscopic tilt) and slightly short.
+            // Adjust the temple mesh (Object_13) geometry relative to the front frame hinge so the arms
+            // angle downward (~8 deg pantoscopic tilt) and extend back to reach comfortably over the ears,
+            // matching the natural cranial profile while preserving seamless connection at the front hinge.
+            const isModel4dd = normalizedFrontUrl.includes('4dd16680') ||
+              activeProduct.sku === 'BPT-AX-01' ||
+              Boolean(model.getObjectByName('Handles_2_7'));
+            if (isModel4dd) {
+              let handlesMesh: THREE.Mesh | null = null;
+              model.traverse((child: any) => {
+                if (child.isMesh) {
+                  const n = (child.name || '').toLowerCase();
+                  const p = (child.parent?.name || '').toLowerCase();
+                  const m = (child.material?.name || '').toLowerCase();
+                  if (n.includes('13') || n.includes('handle') || p.includes('handle') || m.includes('handle')) {
+                    handlesMesh = child;
+                  }
+                }
+              });
+
+              if (handlesMesh && (handlesMesh as THREE.Mesh).geometry) {
+                const geo = (handlesMesh as THREE.Mesh).geometry;
+                const pos = geo.attributes.position;
+                if (pos) {
+                  let hingeZ = -0.04;
+                  let hingeYSum = 0;
+                  let hingeYCount = 0;
+                  for (let i = 0; i < pos.count; i++) {
+                    const z = pos.getZ(i);
+                    if (z > -0.1) {
+                      hingeYSum += pos.getY(i);
+                      hingeYCount++;
+                      if (z > hingeZ) hingeZ = z;
+                    }
+                  }
+                  const hingeY = hingeYCount > 0 ? (hingeYSum / hingeYCount) : 0.178;
+
+                  const pitchRad = -0.14; // ~8.0 degrees downward pantoscopic tilt towards ears
+                  const cosP = Math.cos(pitchRad);
+                  const sinP = Math.sin(pitchRad);
+                  const zScale = 1.15; // stretch length towards ear
+
+                  for (let i = 0; i < pos.count; i++) {
+                    const x = pos.getX(i);
+                    const y = pos.getY(i);
+                    const z = pos.getZ(i);
+
+                    if (z < hingeZ) {
+                      const dz = (z - hingeZ) * zScale;
+                      const dy = y - hingeY;
+                      const newDy = dy * cosP - dz * sinP;
+                      const newDz = dy * sinP + dz * cosP;
+                      pos.setXYZ(i, x, hingeY + newDy, hingeZ + newDz);
+                    }
+                  }
+                  pos.needsUpdate = true;
+                  geo.computeVertexNormals();
+                  geo.computeBoundingBox();
+                  geo.computeBoundingSphere();
+                }
+              }
+            }
+
             const pivot = new THREE.Group();
             pivot.rotation.order = 'YXZ';
             pivot.add(model);
 
-            // Anatomical head occluder (depth mask):
-            // Populates WebGL depth buffer with head volume behind the front frame (Z < 0).
-            // When user turns head, the near-side temple remains visible while the far-side temple
-            // is naturally occluded behind the skull depth buffer instead of showing through the face/lenses.
-            const headRadiusX = size.x * 0.41;
-            const headRadiusY = Math.max(size.y * 1.4, size.x * 0.55);
-            const headRadiusZ = Math.max(size.z * 0.65, size.x * 0.60);
-            const headGeo = new THREE.SphereGeometry(1, 32, 24);
-            headGeo.scale(headRadiusX, headRadiusY, headRadiusZ);
+            // Anatomical head and face occluder (depth mask):
+            // Populates WebGL depth buffer with facial and cranial volume behind the front frame (Z < 0).
+            // 1. Blocks rear temple sections from visibly projecting through the front frame and transparent lenses.
+            // 2. Uses an anatomical face block strictly behind the front frame and lenses so it does not clip
+            //    or swallow the rear sections of the temples as they wrap around the skull toward the ears.
+            // 3. Cranial dome occludes the far temple behind the head during yaw head turns.
+            const fBox = activeFrontRef ? new THREE.Box3().setFromObject(activeFrontRef) : null;
+            const faceZFront = fBox ? (fBox.min.z - size.x * 0.01) : (-size.x * 0.025);
+            const faceHalfWidth = size.x * 0.44;
+            const faceHeight = Math.max(size.y * 1.6, size.x * 0.70);
+            const faceBlockDepth = Math.min(size.z * 0.22, size.x * 0.18);
+            const craniumDepth = Math.max(size.z * 0.85, size.x * 0.80);
+
+            const occluderGroup = new THREE.Group();
+            occluderGroup.name = '__vto_head_occluder__';
+
             const headMat = new THREE.MeshBasicMaterial({
               colorWrite: false, // 100% transparent to color buffer, video shows through
               depthWrite: true,  // Writes head depth into WebGL Z-buffer
             });
-            const headOccluder = new THREE.Mesh(headGeo, headMat);
-            headOccluder.name = '__vto_head_occluder__';
-            headOccluder.renderOrder = -1; // Render first to populate depth buffer
-            headOccluder.position.set(0, -size.y * 0.15, -size.x * 0.05 - headRadiusZ);
-            pivot.add(headOccluder);
+
+            // Facial block: fills the area directly behind the front frame and lenses
+            const faceGeo = new THREE.BoxGeometry(faceHalfWidth * 2, faceHeight, faceBlockDepth);
+            const faceOccluder = new THREE.Mesh(faceGeo, headMat);
+            faceOccluder.renderOrder = -1;
+            faceOccluder.position.set(0, -size.y * 0.12, faceZFront - faceBlockDepth / 2);
+            occluderGroup.add(faceOccluder);
+
+            // Cranial dome: rounded skull volume extending behind temples
+            const craniumGeo = new THREE.SphereGeometry(1, 32, 24);
+            craniumGeo.scale(faceHalfWidth * 0.90, faceHeight * 0.55, craniumDepth * 0.55);
+            const craniumOccluder = new THREE.Mesh(craniumGeo, headMat);
+            craniumOccluder.renderOrder = -1;
+            craniumOccluder.position.set(0, -size.y * 0.12, faceZFront - craniumDepth * 0.50);
+            occluderGroup.add(craniumOccluder);
+
+            pivot.add(occluderGroup);
 
             modelBoundingWidthRef.current = Math.max(0.001, size.x);
 
@@ -1147,7 +1230,24 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 const targetYaw = Math.max(-0.95, Math.min(0.95, rawTargetYaw));
 
                 // 2. Head Roll (in-plane tilt in XY plane)
-                const targetAngle = Math.atan2(eyeDy, eyeDx);
+                // Decoupled from horizontal head yaw:
+                // eyeDx shrinks as cos(yaw) during head turns, which artificially magnifies any vertical
+                // landmark disparity in naive atan2(eyeDy, eyeDx). Using the 3D transverse span sqrt(eyeDx^2 + eyeDz^2)
+                // ensures roll remains completely invariant to left/right head yaw rotations.
+                let rollDx = eyeDx;
+                let rollDy = eyeDy;
+                let rollDz = eyeDz;
+                if (pupilDist > 15 && lPupil && rPupil) {
+                  const pDx = (lPupil.x - rPupil.x) * vidW;
+                  const pDy = (lPupil.y - rPupil.y) * vidH;
+                  const pDz = ((lPupil.z ?? 0) - (rPupil.z ?? 0)) * vidW;
+                  // Pupils are unoccluded during yaw and provide sub-pixel stability
+                  rollDx = pDx * 0.65 + eyeDx * 0.35;
+                  rollDy = pDy * 0.65 + eyeDy * 0.35;
+                  rollDz = pDz * 0.65 + eyeDz * 0.35;
+                }
+                const eyeTransverseSpan = Math.hypot(rollDx, rollDz);
+                const targetAngle = eyeTransverseSpan > 1 ? Math.atan2(rollDy, eyeTransverseSpan) : 0;
 
                 // 3. Head Pitch (sagittal nod in cranial coordinate space)
                 // Anchored directly to the interaural (ear) axis and nose bridge so temples
@@ -1162,29 +1262,36 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 // Otobasion superius / ear root anchors where glasses temples sit above the ears
                 const rEar = rEarTop && rEarTragus
                   ? {
-                    x: rEarTop.x * 0.70 + rEarTragus.x * 0.30,
-                    y: rEarTop.y * 0.70 + rEarTragus.y * 0.30,
-                    z: (rEarTop.z ?? 0) * 0.70 + (rEarTragus.z ?? 0) * 0.30
+                    x: rEarTop.x * 0.50 + rEarTragus.x * 0.50,
+                    y: rEarTop.y * 0.50 + rEarTragus.y * 0.50,
+                    z: (rEarTop.z ?? 0) * 0.50 + (rEarTragus.z ?? 0) * 0.50
                   }
                   : (rEarTop || rEarTragus || rTemple);
 
                 const lEar = lEarTop && lEarTragus
                   ? {
-                    x: lEarTop.x * 0.70 + lEarTragus.x * 0.30,
-                    y: lEarTop.y * 0.70 + lEarTragus.y * 0.30,
-                    z: (lEarTop.z ?? 0) * 0.70 + (lEarTragus.z ?? 0) * 0.30
+                    x: lEarTop.x * 0.50 + lEarTragus.x * 0.50,
+                    y: lEarTop.y * 0.50 + lEarTragus.y * 0.50,
+                    z: (lEarTop.z ?? 0) * 0.50 + (lEarTragus.z ?? 0) * 0.50
                   }
                   : (lEarTop || lEarTragus || lTemple);
 
                 if (rEar && lEar && bridge) {
                   // Cranial interaural midpoint (center of rotation axis between ears)
-                  const earMidX = (rEar.x + lEar.x) * 0.5;
-                  const earMidY = (rEar.y + lEar.y) * 0.5;
-                  const earMidZ = ((rEar.z ?? 0) + (lEar.z ?? 0)) * 0.5;
+                  // When head is turned in yaw, give greater weight to the near visible ear so temple tracking
+                  // locks onto the visible ear rather than being skewed by the occluded far ear
+                  const yawWeight = Math.max(-0.4, Math.min(0.4, rawTargetYaw));
+                  const rWeight = 0.5 - yawWeight * 0.5;
+                  const lWeight = 0.5 + yawWeight * 0.5;
+                  const earMidX = rEar.x * rWeight + lEar.x * lWeight;
+                  const earMidY = rEar.y * rWeight + lEar.y * lWeight;
+                  const earMidZ = ((rEar.z ?? 0) * rWeight + (lEar.z ?? 0) * lWeight);
 
-                  // Screen-space 2D vector from interaural center to nasal bridge
+                  // Facial hinge line height (blends bridge and eye level for zero resting pitch bias)
+                  const eyeMidY = (lEye.y + rEye.y) * 0.5;
+                  const hingeY = bridge.y * 0.35 + eyeMidY * 0.65;
                   const rawDx = (bridge.x - earMidX) * vidW;
-                  const rawDy = (bridge.y - earMidY) * vidH;
+                  const rawDy = (hingeY - earMidY) * vidH;
 
                   // Project into the head's local coordinate space by decoupling in-plane head roll
                   const cosRoll = Math.cos(targetAngle);
@@ -1209,8 +1316,8 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                   if (forehead && chin) {
                     const fDy = (chin.y - forehead.y) * vidH;
                     const fDz = ((chin.z ?? 0) - (forehead.z ?? 0)) * vidW;
-                    // Subtract canonical ~0.25 rad forehead-chin anterior angle to eliminate resting offset
-                    targetPitch = Math.max(-0.55, Math.min(0.55, Math.atan2(fDz, Math.max(10, fDy)) - 0.25));
+                    // Subtract canonical ~0.22 rad forehead-chin anterior angle to eliminate resting offset
+                    targetPitch = Math.max(-0.55, Math.min(0.55, Math.atan2(fDz, Math.max(10, fDy)) - 0.22));
                   }
                 }
 
@@ -1457,19 +1564,30 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
             const baseScale = desiredWidth / (modelBoundingWidthRef.current || 1.0);
             pivot.scale.set(baseScale, baseScale, baseScale);
 
-            // Position at nose bridge (screen center = Three.js origin)
+            // Centered optical axis alignment via setViewOffset:
+            // When an object is placed off-center at (posX, posY) in a perspective camera, viewing it along
+            // oblique perspective rays causes keystone distortion (the opposite side of the frame tilts/drops by ~8px).
+            // By keeping pivot at (0, 0, 0) and using camera.setViewOffset, the glasses rotate symmetrically
+            // on the optical axis, eliminating all asymmetrical dropping/tilting while projecting to the exact screen position.
             const posX = (smooth.x - vidW / 2) + (0.5 - adminAnchorX) * smooth.width;
             const posY = -(smooth.y - vidH / 2) + (adminAnchorY - 0.45) * smooth.height;
-            pivot.position.set(posX, posY, 0);
+            camera.setViewOffset(vidW, vidH, -posX, posY, vidW, vidH);
+            pivot.position.set(0, 0, 0);
 
             // 3D rotations for roll, yaw, pitch with cranial YXZ rotation order (1:1 head-pose tracking)
-            pivot.rotation.z = -smooth.angle;
+            // Roll compensation: In Three.js with Euler order 'YXZ', local Z rotation (roll) is applied
+            // before Y rotation (yaw). Projecting back to screen space foreshortens by cos(yaw).
+            // Multiplying by cos(yaw) guarantees the glasses maintain a stable, uniform tilt angle
+            // during left and right head turns, eliminating unwanted tilting/slanting.
+            const yawCos = Math.cos(smooth.yaw);
+            pivot.rotation.z = -smooth.angle * yawCos;
             pivot.rotation.y = smooth.yaw;
-            pivot.rotation.x = smooth.pitch;
+            pivot.rotation.x = -smooth.pitch * 0.82;
 
             pivot.visible = true;
             renderer.render(scene, camera);
           } else if (renderer && scene && camera) {
+            camera.clearViewOffset();
             if (modelGroup && modelGroup.children[0]) {
               (modelGroup.children[0] as THREE.Group).visible = false;
             }
@@ -1478,6 +1596,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
         } else {
           // Clear Three.js WebGL canvas when rendering 2D PNG
           if (renderer && scene && camera) {
+            camera.clearViewOffset();
             renderer.clear();
           }
 
