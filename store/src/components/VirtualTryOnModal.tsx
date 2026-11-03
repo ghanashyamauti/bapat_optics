@@ -683,7 +683,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 // If a temple arm body is incorrectly using a gold/screw material while the glasses
                 // have black/dark temples, assign the product's original frame material
                 const isTempleArm = (names.includes('dushka') || names.includes('handle') || names.includes('temple') || names.includes('haste') || names.includes('arm')) &&
-                                    !names.includes('vint') && !names.includes('screw') && !names.includes('hinge') && !names.includes('kr');
+                  !names.includes('vint') && !names.includes('screw') && !names.includes('hinge') && !names.includes('kr');
                 const isGoldMat = names.includes('metal_2') || names.includes('gold') || names.includes('brass');
 
                 if (isTempleArm && isGoldMat && frameMat) {
@@ -808,7 +808,7 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
     if (rvfcIdRef.current !== null && videoRef.current && 'cancelVideoFrameCallback' in videoRef.current) {
       try {
         (videoRef.current as any).cancelVideoFrameCallback(rvfcIdRef.current);
-      } catch {}
+      } catch { }
       rvfcIdRef.current = null;
     }
     hasNewCameraFrameRef.current = false;
@@ -1149,14 +1149,69 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 // 2. Head Roll (in-plane tilt in XY plane)
                 const targetAngle = Math.atan2(eyeDy, eyeDx);
 
-                // 3. Head Pitch (sagittal nod in YZ plane)
-                const forehead = landmarks[FOREHEAD_TOP];
-                const chin = landmarks[CHIN_BOTTOM];
+                // 3. Head Pitch (sagittal nod in cranial coordinate space)
+                // Anchored directly to the interaural (ear) axis and nose bridge so temples
+                // remain locked along the sides of the head and behind the ears during upward/downward tilt.
                 let targetPitch = 0;
-                if (forehead && chin) {
-                  const fDy = (chin.y - forehead.y) * vidH;
-                  const fDz = ((chin.z ?? 0) - (forehead.z ?? 0)) * vidW;
-                  targetPitch = Math.max(-0.65, Math.min(0.65, Math.atan2(fDz, Math.max(10, fDy))));
+
+                const rEarTop = landmarks[RIGHT_EAR_TOP];
+                const lEarTop = landmarks[LEFT_EAR_TOP];
+                const rEarTragus = landmarks[RIGHT_EAR_TRAGUS];
+                const lEarTragus = landmarks[LEFT_EAR_TRAGUS];
+
+                // Otobasion superius / ear root anchors where glasses temples sit above the ears
+                const rEar = rEarTop && rEarTragus
+                  ? {
+                    x: rEarTop.x * 0.70 + rEarTragus.x * 0.30,
+                    y: rEarTop.y * 0.70 + rEarTragus.y * 0.30,
+                    z: (rEarTop.z ?? 0) * 0.70 + (rEarTragus.z ?? 0) * 0.30
+                  }
+                  : (rEarTop || rEarTragus || rTemple);
+
+                const lEar = lEarTop && lEarTragus
+                  ? {
+                    x: lEarTop.x * 0.70 + lEarTragus.x * 0.30,
+                    y: lEarTop.y * 0.70 + lEarTragus.y * 0.30,
+                    z: (lEarTop.z ?? 0) * 0.70 + (lEarTragus.z ?? 0) * 0.30
+                  }
+                  : (lEarTop || lEarTragus || lTemple);
+
+                if (rEar && lEar && bridge) {
+                  // Cranial interaural midpoint (center of rotation axis between ears)
+                  const earMidX = (rEar.x + lEar.x) * 0.5;
+                  const earMidY = (rEar.y + lEar.y) * 0.5;
+                  const earMidZ = ((rEar.z ?? 0) + (lEar.z ?? 0)) * 0.5;
+
+                  // Screen-space 2D vector from interaural center to nasal bridge
+                  const rawDx = (bridge.x - earMidX) * vidW;
+                  const rawDy = (bridge.y - earMidY) * vidH;
+
+                  // Project into the head's local coordinate space by decoupling in-plane head roll
+                  const cosRoll = Math.cos(targetAngle);
+                  const sinRoll = Math.sin(targetAngle);
+                  // Sagittal vertical delta:
+                  // When looking UP, nose bridge moves towards top of skull relative to ears (sagittalDy < 0)
+                  // When looking DOWN, nose bridge moves towards chin relative to ears (sagittalDy > 0)
+                  const sagittalDy = -rawDx * sinRoll + rawDy * cosRoll;
+
+                  // Scale-invariant cranial depth between ears and nose bridge in 3D
+                  const measuredDz = Math.abs(((bridge.z ?? 0) - earMidZ) * vidW);
+                  const anatomicalDepth = templeDist > 20 ? templeDist * 0.65 : eyeSpan * 0.72;
+                  const cranialDepth = Math.max(anatomicalDepth, measuredDz);
+
+                  // Ear-to-bridge sagittal pitch angle (zero resting bias on level gaze)
+                  const rawPitch = Math.atan2(sagittalDy, cranialDepth);
+                  targetPitch = Math.max(-0.60, Math.min(0.60, rawPitch));
+                } else {
+                  // Fallback if lateral head landmarks are obscured
+                  const forehead = landmarks[FOREHEAD_TOP];
+                  const chin = landmarks[CHIN_BOTTOM];
+                  if (forehead && chin) {
+                    const fDy = (chin.y - forehead.y) * vidH;
+                    const fDz = ((chin.z ?? 0) - (forehead.z ?? 0)) * vidW;
+                    // Subtract canonical ~0.25 rad forehead-chin anterior angle to eliminate resting offset
+                    targetPitch = Math.max(-0.55, Math.min(0.55, Math.atan2(fDz, Math.max(10, fDy)) - 0.25));
+                  }
                 }
 
                 // Natural frame sizing (3D rotation-invariant)
@@ -1851,33 +1906,30 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                 <button
                   type="button"
                   onClick={() => setLensMode('CLEAR')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${
-                    lensMode === 'CLEAR'
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${lensMode === 'CLEAR'
                       ? 'bg-[#C6A15B] text-black shadow-xs'
                       : 'text-white/70 hover:text-white'
-                  }`}
+                    }`}
                 >
                   Clear Vision
                 </button>
                 <button
                   type="button"
                   onClick={() => setLensMode('BLUEBLOCK')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${
-                    lensMode === 'BLUEBLOCK'
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${lensMode === 'BLUEBLOCK'
                       ? 'bg-[#5c7cfa] text-white shadow-xs'
                       : 'text-white/70 hover:text-white'
-                  }`}
+                    }`}
                 >
                   DuraVision Blue
                 </button>
                 <button
                   type="button"
                   onClick={() => setLensMode('PHOTOFUSION')}
-                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${
-                    lensMode === 'PHOTOFUSION'
+                  className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${lensMode === 'PHOTOFUSION'
                       ? 'bg-slate-700 text-white shadow-xs'
                       : 'text-white/70 hover:text-white'
-                  }`}
+                    }`}
                 >
                   PhotoFusion X
                 </button>
@@ -1889,11 +1941,10 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
               <button
                 type="button"
                 onClick={() => setShowAdjustPanel((p) => !p)}
-                className={`p-2 rounded-lg border transition-colors cursor-pointer ${
-                  showAdjustPanel
+                className={`p-2 rounded-lg border transition-colors cursor-pointer ${showAdjustPanel
                     ? 'border-[#C6A15B] bg-[#C6A15B]/20 text-[#C6A15B]'
                     : 'border-white/10 bg-white/5 text-white hover:bg-white/15'
-                }`}
+                  }`}
                 title="Fine-tune frame size & position"
               >
                 <Sliders size={14} />
@@ -1924,11 +1975,10 @@ const VirtualTryOnModalContent: React.FC<TryOnContentProps> = ({ product: initia
                     key={prod.id}
                     type="button"
                     onClick={() => setVirtualTryOnProduct(prod)}
-                    className={`shrink-0 flex items-center gap-2 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
-                      isSelected
+                    className={`shrink-0 flex items-center gap-2 px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${isSelected
                         ? 'border-[#C6A15B] bg-[#C6A15B]/20 text-white shadow-xs scale-102 ring-1 ring-[#C6A15B]'
                         : 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
-                    }`}
+                      }`}
                   >
                     {thumbUrl && (
                       <img
